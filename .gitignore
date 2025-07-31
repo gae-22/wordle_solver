@@ -1,0 +1,12 @@
+# Rust project configuration files
+Cargo.lock
+debug
+target
+**/*.rs.bk
+
+.github
+.vscode
+
+.DS_Store
+INSTRUCTIONS.md
+word_lists.json
