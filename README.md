@@ -24,8 +24,8 @@
 ### Building from Source
 
 ```bash
-git clone https://github.com/gae-22/wordle-solver.git
-cd wordle_rust
+git clone https://github.com/gae-22/wordle_solver.git
+cd wordle_solver
 cargo build --release
 ```
 
@@ -144,8 +144,8 @@ src/
 
 ```bash
 # Clone the repository
-git clone https://github.com/gae-22/wordle-solver.git
-cd wordle-solver
+git clone https://github.com/gae-22/wordle_solver.git
+cd wordle_solver
 
 # Build and run
 cargo run --release
