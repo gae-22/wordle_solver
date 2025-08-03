@@ -1,0 +1,245 @@
+use crate::core::{
+    error::{DataError, Result},
+    traits::WordListProvider,
+    types::Word,
+};
+use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
+use std::path::Path;
+
+/// Configuration for word list sources
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WordListConfig {
+    pub answers: Vec<String>,
+    pub guesses: Vec<String>,
+}
+
+impl Default for WordListConfig {
+    fn default() -> Self {
+        Self {
+            answers: vec![
+                "https://raw.githubusercontent.com/3b1b/videos/master/_2022/wordle/data/possible_words.txt".to_string(),
+            ],
+            guesses: vec![
+                "https://raw.githubusercontent.com/3b1b/videos/master/_2022/wordle/data/allowed_words.txt".to_string(),
+            ],
+        }
+    }
+}
+
+/// Cached word lists
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WordListCache {
+    pub answer_words: Vec<String>,
+    pub guess_words: Vec<String>,
+    pub last_updated: u64,
+}
+
+/// File-based word list provider with online fetching
+#[derive(Debug)]
+pub struct FileWordListProvider {
+    answer_words: Vec<Word>,
+    guess_words: Vec<Word>,
+    cache_path: String,
+    config: WordListConfig,
+}
+
+impl FileWordListProvider {
+    pub fn new() -> Self {
+        Self::with_cache_path("word_lists.json".to_string())
+    }
+
+    pub fn with_cache_path(cache_path: String) -> Self {
+        Self {
+            answer_words: Vec::new(),
+            guess_words: Vec::new(),
+            cache_path,
+            config: WordListConfig::default(),
+        }
+    }
+
+    pub fn with_config(config: WordListConfig) -> Self {
+        Self {
+            answer_words: Vec::new(),
+            guess_words: Vec::new(),
+            cache_path: "word_lists.json".to_string(),
+            config,
+        }
+    }
+
+    async fn load_from_cache(&self) -> Result<WordListCache> {
+        if !Path::new(&self.cache_path).exists() {
+            return Err(DataError::MissingData("Cache file not found".to_string()).into());
+        }
+
+        let content = tokio::fs::read_to_string(&self.cache_path)
+            .await
+            .map_err(DataError::from)?;
+
+        let cache: WordListCache = serde_json::from_str(&content).map_err(DataError::from)?;
+
+        // Check if cache is fresh (less than 24 hours)
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|_| DataError::InvalidFormat("System time error".to_string()))?
+            .as_secs();
+
+        if now - cache.last_updated > 24 * 60 * 60 {
+            return Err(DataError::InvalidFormat("Cache too old".to_string()).into());
+        }
+
+        Ok(cache)
+    }
+
+    async fn download_words(&self) -> Result<(Vec<String>, Vec<String>)> {
+        let client = reqwest::Client::new();
+        let mut answer_words = HashSet::new();
+        let mut guess_words = HashSet::new();
+
+        // Download answer words
+        for url in &self.config.answers {
+            log::info!("Downloading answer words from: {}", url);
+            let response = client
+                .get(url)
+                .send()
+                .await
+                .map_err(|e| DataError::InvalidFormat(format!("HTTP error: {}", e)))?;
+
+            let text = response
+                .text()
+                .await
+                .map_err(|e| DataError::InvalidFormat(format!("Response error: {}", e)))?;
+
+            for line in text.lines() {
+                let word = line.trim().to_lowercase();
+                if word.len() == 5 && word.chars().all(|c| c.is_ascii_lowercase()) {
+                    answer_words.insert(word);
+                }
+            }
+        }
+
+        // Download guess words
+        for url in &self.config.guesses {
+            log::info!("Downloading guess words from: {}", url);
+            let response = client
+                .get(url)
+                .send()
+                .await
+                .map_err(|e| DataError::InvalidFormat(format!("HTTP error: {}", e)))?;
+
+            let text = response
+                .text()
+                .await
+                .map_err(|e| DataError::InvalidFormat(format!("Response error: {}", e)))?;
+
+            for line in text.lines() {
+                let word = line.trim().to_lowercase();
+                if word.len() == 5 && word.chars().all(|c| c.is_ascii_lowercase()) {
+                    guess_words.insert(word);
+                }
+            }
+        }
+
+        // Ensure all answer words are valid guesses
+        for word in &answer_words {
+            guess_words.insert(word.clone());
+        }
+
+        Ok((
+            answer_words.into_iter().collect(),
+            guess_words.into_iter().collect(),
+        ))
+    }
+
+    async fn save_to_cache(&self, answer_words: &[String], guess_words: &[String]) -> Result<()> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|_| DataError::InvalidFormat("System time error".to_string()))?
+            .as_secs();
+
+        let cache = WordListCache {
+            answer_words: answer_words.to_vec(),
+            guess_words: guess_words.to_vec(),
+            last_updated: now,
+        };
+
+        let json = serde_json::to_string_pretty(&cache).map_err(DataError::from)?;
+
+        tokio::fs::write(&self.cache_path, json)
+            .await
+            .map_err(DataError::from)?;
+
+        Ok(())
+    }
+
+    fn convert_to_words(strings: Vec<String>) -> Result<Vec<Word>> {
+        strings
+            .into_iter()
+            .map(|s| Word::from_str(&s).map_err(|e| DataError::InvalidFormat(e).into()))
+            .collect()
+    }
+}
+
+impl Default for FileWordListProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl WordListProvider for FileWordListProvider {
+    async fn load_words(&mut self) -> Result<Vec<Word>> {
+        // Try loading from cache first
+        if let Ok(cache) = self.load_from_cache().await {
+            log::info!("Loaded word lists from cache");
+            self.answer_words = Self::convert_to_words(cache.answer_words)?;
+            self.guess_words = Self::convert_to_words(cache.guess_words)?;
+        } else {
+            log::info!("Downloading fresh word lists");
+            let (answer_strings, guess_strings) = self.download_words().await?;
+
+            self.answer_words = Self::convert_to_words(answer_strings.clone())?;
+            self.guess_words = Self::convert_to_words(guess_strings.clone())?;
+
+            // Save to cache
+            self.save_to_cache(&answer_strings, &guess_strings).await?;
+        }
+
+        let mut all_words = self.answer_words.clone();
+        all_words.extend(self.guess_words.clone());
+        all_words.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+        all_words.dedup();
+
+        Ok(all_words)
+    }
+
+    fn get_answer_words(&self) -> &[Word] {
+        &self.answer_words
+    }
+
+    fn get_guess_words(&self) -> &[Word] {
+        &self.guess_words
+    }
+
+    fn is_valid_guess(&self, word: &Word) -> bool {
+        self.guess_words.contains(word) || self.answer_words.contains(word)
+    }
+
+    fn is_possible_answer(&self, word: &Word) -> bool {
+        self.answer_words.contains(word)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_word_list_provider_creation() {
+        let provider = FileWordListProvider::new();
+        assert_eq!(provider.cache_path, "word_lists.json");
+        assert_eq!(provider.answer_words.len(), 0);
+        assert_eq!(provider.guess_words.len(), 0);
+    }
+}

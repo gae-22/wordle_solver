@@ -1,6 +1,3 @@
-# Wordle Rust プロジェクト - rustfmt 設定
-# モダンなRustコーディングのベストプラクティスに基づく設定
-
 # 基本設定
 edition = "2024"
 max_width = 100

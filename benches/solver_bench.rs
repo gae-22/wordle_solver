@@ -1,38 +1,38 @@
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
-use wordle_rust::game::WordList;
-use wordle_rust::solver::{EntropyCalculator, WordleSolver};
+use wordle_rust::{CachedEntropyCalculator, EntropyCalculator, Word};
 
 fn benchmark_entropy_calculation(c: &mut Criterion) {
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let word_list = rt.block_on(async { WordList::new().await.unwrap() });
-    let mut entropy_calc = EntropyCalculator::new();
-    let possible_words: Vec<String> = word_list.get_answer_words()[..100].to_vec();
+    let entropy_calc = CachedEntropyCalculator::new();
+
+    // Create sample words for testing
+    let possible_words: Vec<Word> = ["apple", "about", "bread", "crane", "drive"]
+        .iter()
+        .map(|s| Word::from_str(s).unwrap())
+        .collect();
+
+    let guess = Word::from_str("adieu").unwrap();
 
     c.bench_function("entropy_calculation", |b| {
-        b.iter(|| entropy_calc.calculate_entropy(black_box("adieu"), black_box(&possible_words)))
+        b.iter(|| entropy_calc.calculate_entropy(black_box(&guess), black_box(&possible_words)))
     });
 }
 
-fn benchmark_best_guess_selection(c: &mut Criterion) {
-    let rt = tokio::runtime::Runtime::new().unwrap();
-
-    c.bench_function("best_guess_selection", |b| {
+fn benchmark_word_creation(c: &mut Criterion) {
+    c.bench_function("word_creation", |b| {
         b.iter(|| {
-            let mut solver = rt.block_on(async { WordleSolver::new().await.unwrap() });
-            solver.get_best_guess().unwrap()
+            let _word = Word::from_str(black_box("adieu")).unwrap();
         })
     });
 }
 
-fn benchmark_guess_filtering(c: &mut Criterion) {
-    let rt = tokio::runtime::Runtime::new().unwrap();
+fn benchmark_word_validation(c: &mut Criterion) {
+    let words = vec!["apple", "about", "bread", "crane", "drive"];
 
-    c.bench_function("guess_filtering", |b| {
+    c.bench_function("word_validation", |b| {
         b.iter(|| {
-            let mut test_solver = rt.block_on(async { WordleSolver::new().await.unwrap() });
-            test_solver
-                .add_guess_result(black_box("adieu"), black_box("20100"))
-                .unwrap();
+            for word_str in &words {
+                let _valid = Word::from_str(black_box(word_str)).is_ok();
+            }
         })
     });
 }
@@ -40,7 +40,7 @@ fn benchmark_guess_filtering(c: &mut Criterion) {
 criterion_group!(
     benches,
     benchmark_entropy_calculation,
-    benchmark_best_guess_selection,
-    benchmark_guess_filtering
+    benchmark_word_creation,
+    benchmark_word_validation
 );
 criterion_main!(benches);
