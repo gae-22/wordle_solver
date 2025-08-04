@@ -1,15 +1,14 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use std::io::Write;
 use wordle_rust::{
     Command, CommandExecutor, CommandResult, Word, WordleApplicationService,
-    core::types::FeedbackPattern,
+    core::types::FeedbackPattern, run_tui,
 };
 
 #[derive(Parser)]
 #[command(name = "wordle_rust")]
 #[command(about = "Modern AI Wordle Solver with Clean Architecture")]
-#[command(version = "2.0.0")]
+#[command(version = "1.0.0")]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -63,43 +62,10 @@ async fn main() -> Result<()> {
 }
 
 async fn run_interactive_mode() -> Result<()> {
-    log::info!("Starting interactive TUI mode...");
+    log::info!("Starting modern TUI mode...");
 
-    // Create the modern app service
-    let app_service = WordleApplicationService::new().await?;
-
-    // Initialize with first guess suggestion
-    let first_guess = app_service.get_best_first_guess()?;
-    println!("🎯 Welcome to Modern Wordle Solver!");
-    println!("💡 Suggested first guess: {}", first_guess);
-    println!("⌨️  Type 'q' to quit, 'h' for help");
-
-    // Simple interactive loop
-    loop {
-        print!("\n> ");
-        std::io::stdout().flush()?;
-
-        let mut input = String::new();
-        std::io::stdin().read_line(&mut input)?;
-        let input = input.trim();
-
-        if input == "q" || input == "quit" {
-            println!("👋 Goodbye!");
-            break;
-        } else if input == "h" || input == "help" {
-            println!("Commands:");
-            println!("  q, quit - Exit the program");
-            println!("  h, help - Show this help");
-            println!("  first-guess - Get the best first guess");
-        } else if input == "first-guess" {
-            let guess = app_service.get_best_first_guess()?;
-            println!("🌟 Best first guess: {}", guess);
-        } else if !input.is_empty() {
-            println!("❓ Unknown command '{}'. Type 'h' for help.", input);
-        }
-    }
-
-    Ok(())
+    // Run the new TUI application
+    run_tui().await
 }
 
 async fn solve_puzzle(target: Option<String>, guess_pairs: Vec<String>) -> Result<()> {

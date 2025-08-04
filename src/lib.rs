@@ -12,6 +12,9 @@ pub mod infrastructure;
 /// Application layer - orchestration and use cases
 pub mod application;
 
+/// Presentation layer - user interfaces (TUI, etc.)
+pub mod presentation;
+
 // Re-export main types for easy access
 pub use core::error::{Result, WordleError};
 
@@ -44,3 +47,6 @@ pub use application::{
     AppEvent, AppState as ApplicationState, Command, CommandExecutor, CommandResult,
     EventHandler as ApplicationEventHandler, WordleApplicationService,
 };
+
+// Presentation layer
+pub use presentation::{run_tui, TuiApp};
