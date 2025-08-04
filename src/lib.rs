@@ -17,6 +17,7 @@ pub mod presentation;
 
 // Re-export main types for easy access
 pub use core::error::{Result, WordleError};
+pub use core::container::{Container, DependencyConfig, StrategyType, WordListConfig};
 
 // Primary interfaces
 pub use core::traits::{
@@ -39,7 +40,7 @@ pub use domain::{
 // Infrastructure implementations
 pub use infrastructure::{
     CachedEntropyCalculator, EntropyBasedStrategy, FileWordListProvider, FrequencyBasedStrategy,
-    SimpleEntropyCalculator,
+    HybridStrategy, SimpleEntropyCalculator,
 };
 
 // Application layer

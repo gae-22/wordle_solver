@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use wordle_rust::{
-    Command, CommandExecutor, CommandResult, Word, WordleApplicationService,
+    Command, CommandExecutor, CommandResult, Word, Container,
     core::types::FeedbackPattern, run_tui,
 };
 
@@ -69,7 +69,9 @@ async fn run_interactive_mode() -> Result<()> {
 }
 
 async fn solve_puzzle(target: Option<String>, guess_pairs: Vec<String>) -> Result<()> {
-    let mut app_service = WordleApplicationService::new().await?;
+    // Use dependency injection with default configuration
+    let container = Container::new();
+    let mut app_service = container.create_application_service().await?;
 
     // Set target word if provided
     if let Some(target_word) = target {
@@ -148,7 +150,8 @@ async fn solve_puzzle(target: Option<String>, guess_pairs: Vec<String>) -> Resul
 }
 
 async fn get_first_guess() -> Result<()> {
-    let app_service = WordleApplicationService::new().await?;
+    let container = Container::new();
+    let app_service = container.create_application_service().await?;
     let first_guess = app_service.get_best_first_guess()?;
 
     println!("🌟 Best first guess: {}", first_guess);
@@ -160,7 +163,8 @@ async fn get_first_guess() -> Result<()> {
 async fn run_benchmark(count: usize) -> Result<()> {
     println!("🚀 Running benchmark with {} words...", count);
 
-    let mut app_service = WordleApplicationService::new().await?;
+    let container = Container::new();
+    let mut app_service = container.create_application_service().await?;
     let first_guess = app_service.get_best_first_guess()?;
 
     // Get word list for testing

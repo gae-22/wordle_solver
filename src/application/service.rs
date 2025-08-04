@@ -61,6 +61,22 @@ impl WordleApplicationService {
         })
     }
 
+    /// Create application service with injected dependencies (Clean Architecture)
+    pub async fn with_dependencies(
+        game_engine: Box<dyn GameEngine>,
+        solver: Box<dyn WordleSolver>,
+    ) -> Result<Self> {
+        let state_manager = AppStateManager::new();
+        let command_validator = Box::new(DefaultCommandValidator);
+
+        Ok(Self {
+            game_engine,
+            solver,
+            state_manager,
+            command_validator,
+        })
+    }
+
     pub fn with_components(
         game_engine: Box<dyn GameEngine>,
         solver: Box<dyn WordleSolver>,

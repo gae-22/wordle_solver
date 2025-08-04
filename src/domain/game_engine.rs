@@ -36,6 +36,11 @@ impl DefaultGameEngine {
         }
     }
 
+    /// Create a new game engine with a feedback generator (async version for compatibility)
+    pub async fn with_feedback_generator_async(feedback_generator: Box<dyn FeedbackGenerator>) -> Result<Self> {
+        Ok(Self::with_feedback_generator(feedback_generator))
+    }
+
     /// Get the target word (if set)
     pub fn target_word(&self) -> Option<&Word> {
         self.target_word.as_ref()

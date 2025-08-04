@@ -9,7 +9,7 @@ use std::io;
 use tokio::time::{Duration, interval};
 
 use crate::{
-    Command, CommandResult,
+    Command, CommandResult, Container,
     application::{WordleApplicationService, commands::CommandExecutor},
     core::types::{FeedbackPattern, Word},
     presentation::tui::{
@@ -63,7 +63,8 @@ impl TuiApp {
         }
 
         // Initialize application components
-        let app_service = WordleApplicationService::new().await?;
+        let container = Container::new();
+        let app_service = container.create_application_service().await?;
         let event_loop = EventLoop::default();
         let mut state = TuiState::new();
 
@@ -375,7 +376,7 @@ impl TuiApp {
     /// Reset the game
     async fn reset_game(&mut self) -> Result<()> {
         self.state = TuiState::new();
-        self.app_service = WordleApplicationService::new().await?;
+        self.app_service = Container::new().create_application_service().await?;
         self.feedback_manager = FeedbackInputManager::new();
 
         self.state.add_log(LogLevel::Info, "Game reset".to_string());

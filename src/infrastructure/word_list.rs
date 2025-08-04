@@ -50,6 +50,10 @@ impl FileWordListProvider {
         Self::with_cache_path("word_lists.json".to_string())
     }
 
+    pub fn with_path(cache_path: String) -> Self {
+        Self::with_cache_path(cache_path)
+    }
+
     pub fn with_cache_path(cache_path: String) -> Self {
         Self {
             answer_words: Vec::new(),

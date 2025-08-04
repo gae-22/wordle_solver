@@ -214,6 +214,124 @@ impl SolvingStrategy for FrequencyBasedStrategy {
     }
 }
 
+/// Hybrid strategy combining entropy and frequency analysis
+#[derive(Debug)]
+pub struct HybridStrategy<E: EntropyCalculator> {
+    entropy_calculator: E,
+    frequency_weights: std::collections::HashMap<char, f64>,
+    best_first_guess: Word,
+    use_entropy_threshold: usize,
+}
+
+impl<E: EntropyCalculator> HybridStrategy<E> {
+    pub fn new(entropy_calculator: E) -> Result<Self> {
+        let best_first_guess =
+            Word::from_str("adieu").map_err(|e| SolverError::AlgorithmFailure(e))?;
+
+        // Initialize common letter frequencies
+        let mut frequency_weights = std::collections::HashMap::new();
+        frequency_weights.insert('e', 12.02);
+        frequency_weights.insert('t', 9.10);
+        frequency_weights.insert('a', 8.12);
+        frequency_weights.insert('o', 7.68);
+        frequency_weights.insert('i', 6.97);
+        frequency_weights.insert('n', 6.75);
+        frequency_weights.insert('s', 6.33);
+        frequency_weights.insert('h', 6.09);
+        frequency_weights.insert('r', 5.99);
+
+        Ok(Self {
+            entropy_calculator,
+            frequency_weights,
+            best_first_guess,
+            use_entropy_threshold: 50, // Use entropy when more than 50 words remain
+        })
+    }
+
+    fn calculate_frequency_score(&self, word: &Word) -> f64 {
+        let mut score = 0.0;
+        let mut used_chars = std::collections::HashSet::new();
+
+        for ch in word.as_str().chars() {
+            if !used_chars.contains(&ch) {
+                score += self.frequency_weights.get(&ch).unwrap_or(&0.0);
+                used_chars.insert(ch);
+            }
+        }
+
+        score
+    }
+
+    fn calculate_hybrid_score(&self, word: &Word, possible_words: &[Word]) -> f64 {
+        let entropy = self.entropy_calculator.calculate_entropy(word, possible_words);
+        let frequency = self.calculate_frequency_score(word);
+
+        // Weight entropy more heavily when many words remain
+        let entropy_weight = if possible_words.len() > self.use_entropy_threshold {
+            0.8
+        } else {
+            0.3
+        };
+        let frequency_weight = 1.0 - entropy_weight;
+
+        entropy * entropy_weight + frequency * frequency_weight
+    }
+}
+
+impl<E: EntropyCalculator> SolvingStrategy for HybridStrategy<E> {
+    fn get_best_guess(&mut self, possible_words: &[Word], candidates: &[Word]) -> Result<Word> {
+        if possible_words.is_empty() {
+            return Err(SolverError::NoPossibleWords.into());
+        }
+
+        if possible_words.len() == 1 {
+            return Ok(possible_words[0].clone());
+        }
+
+        if candidates.is_empty() {
+            return Err(SolverError::NoCandidates.into());
+        }
+
+        // Find the best guess using hybrid scoring
+        let best_candidate = candidates
+            .iter()
+            .max_by(|a, b| {
+                let score_a = self.calculate_hybrid_score(a, possible_words);
+                let score_b = self.calculate_hybrid_score(b, possible_words);
+                score_a.partial_cmp(&score_b).unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .ok_or(SolverError::NoCandidates)?;
+
+        Ok(best_candidate.clone())
+    }
+
+    fn get_best_first_guess(&self) -> Result<Word> {
+        Ok(self.best_first_guess.clone())
+    }
+
+    fn get_top_candidates(
+        &mut self,
+        possible_words: &[Word],
+        candidates: &[Word],
+        limit: usize,
+    ) -> Vec<(Word, f64)> {
+        let mut scored_candidates: Vec<_> = candidates
+            .iter()
+            .map(|word| (word.clone(), self.calculate_hybrid_score(word, possible_words)))
+            .collect();
+
+        scored_candidates
+            .sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        scored_candidates.truncate(limit);
+        scored_candidates
+    }
+
+    fn clear_cache(&mut self) {
+        // Clear frequency weights if needed
+        self.frequency_weights.clear();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
