@@ -263,7 +263,9 @@ impl<E: EntropyCalculator> HybridStrategy<E> {
     }
 
     fn calculate_hybrid_score(&self, word: &Word, possible_words: &[Word]) -> f64 {
-        let entropy = self.entropy_calculator.calculate_entropy(word, possible_words);
+        let entropy = self
+            .entropy_calculator
+            .calculate_entropy(word, possible_words);
         let frequency = self.calculate_frequency_score(word);
 
         // Weight entropy more heavily when many words remain
@@ -298,7 +300,9 @@ impl<E: EntropyCalculator> SolvingStrategy for HybridStrategy<E> {
             .max_by(|a, b| {
                 let score_a = self.calculate_hybrid_score(a, possible_words);
                 let score_b = self.calculate_hybrid_score(b, possible_words);
-                score_a.partial_cmp(&score_b).unwrap_or(std::cmp::Ordering::Equal)
+                score_a
+                    .partial_cmp(&score_b)
+                    .unwrap_or(std::cmp::Ordering::Equal)
             })
             .ok_or(SolverError::NoCandidates)?;
 
@@ -317,7 +321,12 @@ impl<E: EntropyCalculator> SolvingStrategy for HybridStrategy<E> {
     ) -> Vec<(Word, f64)> {
         let mut scored_candidates: Vec<_> = candidates
             .iter()
-            .map(|word| (word.clone(), self.calculate_hybrid_score(word, possible_words)))
+            .map(|word| {
+                (
+                    word.clone(),
+                    self.calculate_hybrid_score(word, possible_words),
+                )
+            })
             .collect();
 
         scored_candidates

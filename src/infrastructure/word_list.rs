@@ -6,7 +6,7 @@ use crate::core::{
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Configuration for word list sources
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -46,8 +46,54 @@ pub struct FileWordListProvider {
 }
 
 impl FileWordListProvider {
+    /// Get the default word lists cache path in the project root
+    fn get_default_cache_path() -> String {
+        // Try to find the project root by looking for Cargo.toml
+        // Start from the executable's directory and work upwards
+        let exe_path = std::env::current_exe()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .parent()
+            .unwrap_or(&PathBuf::from("."))
+            .to_path_buf();
+
+        let mut current_dir = exe_path;
+
+        // Look up the directory tree for Cargo.toml
+        loop {
+            let cargo_toml = current_dir.join("Cargo.toml");
+            if cargo_toml.exists() {
+                let cache_path = current_dir.join("word_lists.json");
+                return cache_path.to_string_lossy().to_string();
+            }
+
+            if let Some(parent) = current_dir.parent() {
+                current_dir = parent.to_path_buf();
+            } else {
+                break;
+            }
+        }
+
+        // Fallback: try current working directory
+        let mut current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        loop {
+            let cargo_toml = current_dir.join("Cargo.toml");
+            if cargo_toml.exists() {
+                let cache_path = current_dir.join("word_lists.json");
+                return cache_path.to_string_lossy().to_string();
+            }
+
+            if let Some(parent) = current_dir.parent() {
+                current_dir = parent.to_path_buf();
+            } else {
+                // Final fallback to current directory
+                return "word_lists.json".to_string();
+            }
+        }
+    }
+
     pub fn new() -> Self {
-        Self::with_cache_path("word_lists.json".to_string())
+        let cache_path = Self::get_default_cache_path();
+        Self::with_cache_path(cache_path)
     }
 
     pub fn with_path(cache_path: String) -> Self {
@@ -67,7 +113,7 @@ impl FileWordListProvider {
         Self {
             answer_words: Vec::new(),
             guess_words: Vec::new(),
-            cache_path: "word_lists.json".to_string(),
+            cache_path: Self::get_default_cache_path(),
             config,
         }
     }
@@ -242,7 +288,8 @@ mod tests {
     #[tokio::test]
     async fn test_word_list_provider_creation() {
         let provider = FileWordListProvider::new();
-        assert_eq!(provider.cache_path, "word_lists.json");
+        // The cache path should now point to the project root
+        assert!(provider.cache_path.ends_with("word_lists.json"));
         assert_eq!(provider.answer_words.len(), 0);
         assert_eq!(provider.guess_words.len(), 0);
     }
