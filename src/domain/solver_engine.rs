@@ -42,17 +42,70 @@ impl DefaultWordleSolver {
         // Precompute candidates (answers ∪ guesses), sorted/deduped once
         let mut candidates = word_list_provider.get_answer_words().to_vec();
         candidates.extend(word_list_provider.get_guess_words().iter().cloned());
-        candidates.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+        candidates.sort();
         candidates.dedup();
 
-        Ok(Self {
+        // If provider is FileWordListProvider, and frequency is available, update default first guess via strategy if it supports it.
+        // We won't downcast the boxed trait; instead, we compute best first guess here and ignore if not applicable.
+        let initial_guess =
+            if let Some(freq_guess) = Self::select_initial_guess_from_frequency(&possible_words) {
+                Some(freq_guess)
+            } else {
+                None
+            };
+
+        let mut solver = Self {
             word_list_provider,
             strategy,
             constraint_filter,
             possible_words,
             candidates: Arc::new(candidates),
             guess_history: Vec::new(),
-        })
+        };
+
+        if let Some(g) = initial_guess {
+            // Best-effort: if strategy exposes get_best_first_guess only, we can't set it.
+            // So we pre-pend a guess suggestion by returning through get_best_first_guess later.
+            // For simplicity, we store it by pushing to candidates front if not present.
+            let mut c = Arc::try_unwrap(solver.candidates).unwrap_or_else(|arc| (*arc).clone());
+            if !c.contains(&g) {
+                c.insert(0, g.clone());
+            } else {
+                // Move to front
+                if let Some(pos) = c.iter().position(|w| w == &g) {
+                    c.swap(0, pos);
+                }
+            }
+            solver.candidates = Arc::new(c);
+        }
+
+        Ok(solver)
+    }
+
+    fn select_initial_guess_from_frequency(answers: &[Word]) -> Option<Word> {
+        if answers.is_empty() {
+            return None;
+        }
+        // Build frequency on the fly to avoid provider coupling; answersのみでポジション頻度を出す
+        let mut pos_counts = [[0u32; 26]; 5];
+        for w in answers {
+            let b = w.bytes();
+            for pos in 0..5 {
+                let idx = (b[pos] - b'a') as usize;
+                if idx < 26 {
+                    pos_counts[pos][idx] += 1;
+                }
+            }
+        }
+        answers
+            .iter()
+            .max_by_key(|w| {
+                let b = w.bytes();
+                (0..5)
+                    .map(|pos| pos_counts[pos][(b[pos] - b'a') as usize] as u64)
+                    .sum::<u64>()
+            })
+            .cloned()
     }
 
     /// Update possible words based on constraints

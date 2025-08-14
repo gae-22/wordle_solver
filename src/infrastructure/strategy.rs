@@ -336,13 +336,49 @@ impl<E: EntropyCalculator> HybridStrategy<E> {
         let entropy = self
             .entropy_calculator
             .calculate_entropy(word, possible_words);
-        let frequency = self.calculate_frequency_score(word);
+
+        // frequency: 文字頻度 + 位置頻度 + ビグラム簡易スコア
+        let mut frequency = self.calculate_frequency_score(word);
+        // 位置頻度（answersから動的計算）
+        let mut pos_counts = [[0u32; 26]; 5];
+        for w in possible_words {
+            let b = w.bytes();
+            for pos in 0..5 {
+                let idx = (b[pos] - b'a') as usize;
+                if idx < 26 {
+                    pos_counts[pos][idx] += 1;
+                }
+            }
+        }
+        let b = word.bytes();
+        for pos in 0..5 {
+            frequency +=
+                pos_counts[pos][(b[pos] - b'a') as usize] as f64 / possible_words.len() as f64;
+        }
+        // ビグラム（簡易）
+        let mut bigram_bonus = 0.0;
+        for i in 0..4 {
+            let count = possible_words
+                .iter()
+                .filter(|w| {
+                    let wb = w.bytes();
+                    wb[i] == b[i] && wb[i + 1] == b[i + 1]
+                })
+                .count();
+            bigram_bonus += (count as f64) / (possible_words.len() as f64);
+        }
+        frequency += bigram_bonus;
 
         // Weight entropy more heavily when many words remain
-        let entropy_weight = if possible_words.len() > self.use_entropy_threshold {
+        let n = possible_words.len();
+        let entropy_weight = if n > self.use_entropy_threshold {
             0.8
+        } else if n > 10 {
+            0.6
+        } else if n > 3 {
+            0.45
         } else {
-            0.3
+            0.25
         };
         let frequency_weight = 1.0 - entropy_weight;
 

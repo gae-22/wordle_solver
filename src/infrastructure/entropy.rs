@@ -1,9 +1,4 @@
-use crate::core::{
-    traits::{EntropyCalculator, FeedbackGenerator},
-    types::Word,
-};
-use crate::domain::DefaultFeedbackGenerator;
-use std::collections::HashMap;
+use crate::core::{traits::EntropyCalculator, types::Word};
 
 /// High-performance entropy calculator with caching
 #[derive(Debug)]
@@ -130,24 +125,51 @@ impl EntropyCalculator for CachedEntropyCalculator {
 }
 
 /// Simple entropy calculator without caching (for testing/comparison)
-#[derive(Debug)]
-pub struct SimpleEntropyCalculator {
-    feedback_generator: DefaultFeedbackGenerator,
-}
+#[derive(Debug, Default)]
+pub struct SimpleEntropyCalculator;
 
 impl SimpleEntropyCalculator {
     pub fn new() -> Self {
-        Self {
-            feedback_generator: DefaultFeedbackGenerator::new(),
+        Self
+    }
+
+    #[inline]
+    fn feedback_index_bytes(&self, guess_b: &[u8; 5], target_b: &[u8; 5]) -> usize {
+        // Same algorithm as CachedEntropyCalculator
+        let mut used = [false; 5];
+        let mut f = [0u8; 5];
+        for i in 0..5 {
+            if guess_b[i] == target_b[i] {
+                f[i] = 2;
+                used[i] = true;
+            }
         }
+        for i in 0..5 {
+            if f[i] == 0 {
+                let g = guess_b[i];
+                for j in 0..5 {
+                    if !used[j] && g == target_b[j] {
+                        f[i] = 1;
+                        used[j] = true;
+                        break;
+                    }
+                }
+            }
+        }
+        (f[0] as usize)
+            + (f[1] as usize) * 3
+            + (f[2] as usize) * 9
+            + (f[3] as usize) * 27
+            + (f[4] as usize) * 81
+    }
+
+    #[inline]
+    fn feedback_index(&self, guess: &Word, target: &Word) -> usize {
+        self.feedback_index_bytes(guess.bytes(), target.bytes())
     }
 }
 
-impl Default for SimpleEntropyCalculator {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+// Default derived above
 
 impl EntropyCalculator for SimpleEntropyCalculator {
     fn calculate_entropy(&self, guess: &Word, possible_words: &[Word]) -> f64 {
@@ -155,23 +177,18 @@ impl EntropyCalculator for SimpleEntropyCalculator {
             return 0.0;
         }
 
-        let mut groups = HashMap::new();
-
-        for word in possible_words {
-            let feedback = self.feedback_generator.generate_feedback(guess, word);
-            *groups.entry(feedback).or_insert(0) += 1;
+        let mut counts = [0usize; 243];
+        for w in possible_words {
+            let idx = self.feedback_index(guess, w);
+            counts[idx] += 1;
         }
-
-        let total_words = possible_words.len() as f64;
-        groups
-            .values()
-            .map(|&count| {
-                let probability = count as f64 / total_words;
-                if probability > 0.0 {
-                    -probability * probability.log2()
-                } else {
-                    0.0
-                }
+        let total = possible_words.len() as f64;
+        counts
+            .iter()
+            .filter(|&&c| c > 0)
+            .map(|&c| {
+                let p = c as f64 / total;
+                -p * p.log2()
             })
             .sum()
     }
@@ -181,10 +198,26 @@ impl EntropyCalculator for SimpleEntropyCalculator {
             return 0.0;
         }
 
-        let entropy = self.calculate_entropy(guess, possible_words);
-        // Convert entropy to information gain approximation
-        let max_possible_entropy = (possible_words.len() as f64).log2();
-        max_possible_entropy - entropy
+        // Use expected log-size reduction, same as cached version
+        if possible_words.is_empty() {
+            return 0.0;
+        }
+        let mut counts = [0usize; 243];
+        for w in possible_words {
+            let idx = self.feedback_index(guess, w);
+            counts[idx] += 1;
+        }
+        let total = possible_words.len() as f64;
+        let expected_log_size: f64 = counts
+            .iter()
+            .filter(|&&c| c > 0)
+            .map(|&c| {
+                let p = c as f64 / total;
+                let log_size = (c as f64).log2();
+                p * log_size
+            })
+            .sum();
+        total.log2() - expected_log_size
     }
 
     fn find_max_entropy_guess(&self, candidates: &[Word], possible_words: &[Word]) -> Option<Word> {

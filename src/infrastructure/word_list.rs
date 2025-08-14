@@ -34,12 +34,27 @@ impl Default for WordListConfig {
     }
 }
 
+/// Frequency data for initial heuristics
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct FrequencyData {
+    #[serde(default)]
+    pub letter_counts: [u32; 26],
+    #[serde(default)]
+    pub position_counts: [[u32; 26]; 5],
+    /// Bigram counts for adjacent pairs across positions 0-3 (pairs 0-1,1-2,2-3,3-4)
+    #[serde(default)]
+    pub bigram_counts: [[[u32; 26]; 26]; 4],
+}
+
 /// Cached word lists (JSON-compatible in-memory shape)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WordListCache {
     pub answer_words: Vec<String>,
     pub guess_words: Vec<String>,
     pub last_updated: u64,
+    /// Optional frequency data (WLF2+)
+    #[serde(default)]
+    pub frequency: FrequencyData,
 }
 
 /// File-based word list provider with online fetching
@@ -51,6 +66,7 @@ pub struct FileWordListProvider {
     /// Path to compact binary cache optimized for Wordle lookups
     bin_cache_path: String,
     config: WordListConfig,
+    frequency: Option<FrequencyData>,
 }
 
 impl FileWordListProvider {
@@ -155,6 +171,7 @@ impl FileWordListProvider {
             cache_path,
             bin_cache_path,
             config: WordListConfig::default(),
+            frequency: None,
         };
         // Load optional source override config if present
         if let Some(cfg) = this.load_config_override() {
@@ -170,6 +187,7 @@ impl FileWordListProvider {
             cache_path: Self::get_default_cache_path(),
             bin_cache_path: Self::get_default_bin_cache_path(),
             config,
+            frequency: None,
         }
     }
 
@@ -298,10 +316,21 @@ impl FileWordListProvider {
             .map_err(|_| DataError::InvalidFormat("System time error".to_string()))?
             .as_secs();
 
+        // Dedup for stable output
+        let mut a = answer_words.to_vec();
+        let mut g = guess_words.to_vec();
+        a.sort();
+        a.dedup();
+        g.sort();
+        g.dedup();
+
+        let frequency = Self::compute_frequency(&a);
+
         let cache = WordListCache {
-            answer_words: answer_words.to_vec(),
-            guess_words: guess_words.to_vec(),
+            answer_words: a,
+            guess_words: g,
             last_updated: now,
+            frequency,
         };
 
         // Write compact binary cache for fast load (WLF only)
@@ -324,6 +353,11 @@ impl FileWordListProvider {
     /// Get the path to the binary word list cache file (WLF)
     pub fn bin_cache_path(&self) -> &str {
         &self.bin_cache_path
+    }
+
+    /// Get frequency data if available
+    pub fn frequency_data(&self) -> Option<&FrequencyData> {
+        self.frequency.as_ref()
     }
 
     /// Force refresh the word lists cache from remote sources.
@@ -377,19 +411,28 @@ impl FileWordListProvider {
         Ok(cache)
     }
 
-    /// Write the compact WLF file
+    /// Write the compact WLF file (WLF3)
     async fn write_wlf(&self, path: &str, cache: &WordListCache) -> Result<()> {
-        // Format:
-        // magic: b"WLF1" (4)
+        // Format (WLF3):
+        // magic: b"WLF3" (4)
         // last_updated: u64 LE (8)
         // answers_count: u32 LE (4)
         // guesses_count: u32 LE (4)
         // answers words: answers_count * 5 bytes (ASCII a-z)
         // guesses words: guesses_count * 5 bytes
+        // letter_counts: 26 * u32
+        // position_counts: 5 * 26 * u32
+        // bigram_counts: 4 * 26 * 26 * u32
         let mut buf = Vec::with_capacity(
-            4 + 8 + 4 + 4 + (cache.answer_words.len() + cache.guess_words.len()) * 5,
+            4 + 8
+                + 4
+                + 4
+                + (cache.answer_words.len() + cache.guess_words.len()) * 5
+                + 26 * 4
+                + 5 * 26 * 4
+                + 4 * 26 * 26 * 4,
         );
-        buf.extend_from_slice(b"WLF1");
+        buf.extend_from_slice(b"WLF3");
         buf.extend_from_slice(&cache.last_updated.to_le_bytes());
         let a = cache.answer_words.len() as u32;
         let g = cache.guess_words.len() as u32;
@@ -400,6 +443,22 @@ impl FileWordListProvider {
         }
         for w in &cache.guess_words {
             Self::push_word5(&mut buf, w)?;
+        }
+        // frequency
+        for i in 0..26 {
+            buf.extend_from_slice(&cache.frequency.letter_counts[i].to_le_bytes());
+        }
+        for pos in 0..5 {
+            for i in 0..26 {
+                buf.extend_from_slice(&cache.frequency.position_counts[pos][i].to_le_bytes());
+            }
+        }
+        for pair in 0..4 {
+            for a in 0..26 {
+                for b in 0..26 {
+                    buf.extend_from_slice(&cache.frequency.bigram_counts[pair][a][b].to_le_bytes());
+                }
+            }
         }
         tokio::fs::write(path, buf).await.map_err(DataError::from)?;
         Ok(())
@@ -415,11 +474,15 @@ impl FileWordListProvider {
         Ok(())
     }
 
-    fn parse_wlf(bytes: &[u8]) -> Result<WordListCache> {
+    pub(crate) fn parse_wlf(bytes: &[u8]) -> Result<WordListCache> {
         if bytes.len() < 4 + 8 + 4 + 4 {
             return Err(DataError::InvalidFormat("WLF too small".to_string()).into());
         }
-        if &bytes[0..4] != b"WLF1" {
+        let magic = &bytes[0..4];
+        let is_v1 = magic == b"WLF1";
+        let is_v2 = magic == b"WLF2";
+        let is_v3 = magic == b"WLF3";
+        if !is_v1 && !is_v2 && !is_v3 {
             return Err(DataError::InvalidFormat("WLF magic mismatch".to_string()).into());
         }
         let mut off = 4;
@@ -438,7 +501,13 @@ impl FileWordListProvider {
         let last_updated = read_u64(bytes, &mut off);
         let a = read_u32(bytes, &mut off) as usize;
         let g = read_u32(bytes, &mut off) as usize;
-        let needed = 4 + 8 + 4 + 4 + (a + g) * 5;
+        let mut needed = 4 + 8 + 4 + 4 + (a + g) * 5;
+        if is_v2 || is_v3 {
+            needed += 26 * 4 + 5 * 26 * 4;
+            if is_v3 {
+                needed += 4 * 26 * 26 * 4;
+            }
+        }
         if bytes.len() != needed {
             return Err(DataError::InvalidFormat("WLF size mismatch".to_string()).into());
         }
@@ -465,11 +534,69 @@ impl FileWordListProvider {
             }
             guess_words.push(s.to_string());
         }
+        let mut frequency = FrequencyData::default();
+        if is_v2 || is_v3 {
+            let mut p = base + g * 5;
+            for i in 0..26 {
+                let mut arr = [0u8; 4];
+                arr.copy_from_slice(&bytes[p..p + 4]);
+                p += 4;
+                frequency.letter_counts[i] = u32::from_le_bytes(arr);
+            }
+            for pos in 0..5 {
+                for i in 0..26 {
+                    let mut arr = [0u8; 4];
+                    arr.copy_from_slice(&bytes[p..p + 4]);
+                    p += 4;
+                    frequency.position_counts[pos][i] = u32::from_le_bytes(arr);
+                }
+            }
+            if is_v3 {
+                for pair in 0..4 {
+                    for a in 0..26 {
+                        for b in 0..26 {
+                            let mut arr = [0u8; 4];
+                            arr.copy_from_slice(&bytes[p..p + 4]);
+                            p += 4;
+                            frequency.bigram_counts[pair][a][b] = u32::from_le_bytes(arr);
+                        }
+                    }
+                }
+            }
+        }
         Ok(WordListCache {
             answer_words,
             guess_words,
             last_updated,
+            frequency,
         })
+    }
+
+    fn compute_frequency(words: &[String]) -> FrequencyData {
+        let mut freq = FrequencyData::default();
+        for w in words {
+            let bytes = w.as_bytes();
+            let mut seen = [false; 26];
+            for (pos, &b) in bytes.iter().enumerate().take(5) {
+                let idx = (b - b'a') as usize;
+                if idx < 26 {
+                    freq.position_counts[pos][idx] += 1;
+                    if !seen[idx] {
+                        freq.letter_counts[idx] += 1;
+                        seen[idx] = true;
+                    }
+                }
+            }
+            // bigrams: pairs 0-1,1-2,2-3,3-4
+            for pair in 0..4 {
+                let a = (bytes[pair] - b'a') as usize;
+                let b = (bytes[pair + 1] - b'a') as usize;
+                if a < 26 && b < 26 {
+                    freq.bigram_counts[pair][a][b] += 1;
+                }
+            }
+        }
+        freq
     }
 }
 
@@ -482,43 +609,54 @@ impl Default for FileWordListProvider {
 #[async_trait]
 impl WordListProvider for FileWordListProvider {
     async fn load_words(&mut self) -> Result<Vec<Word>> {
-        // Try loading from cache first
-        if let Ok(cache) = self.load_from_cache().await {
-            log::info!("Loaded word lists from cache");
-            self.answer_words = Self::convert_to_words(cache.answer_words)?;
-            self.guess_words = Self::convert_to_words(cache.guess_words)?;
-        } else {
-            log::info!("Downloading fresh word lists");
-            match self.download_words().await {
-                Ok((answer_strings, guess_strings)) => {
-                    self.answer_words = Self::convert_to_words(answer_strings.clone())?;
-                    self.guess_words = Self::convert_to_words(guess_strings.clone())?;
-                    // Save to cache
-                    self.save_to_cache(&answer_strings, &guess_strings).await?;
-                }
-                Err(e) => {
-                    log::warn!(
-                        "Download failed: {}. Falling back to stale cache if available.",
-                        e
-                    );
-                    // Try stale cache as a last resort
-                    let cache = self.load_cache_unchecked().await?;
+        // Prefer fast local binary cache without freshness check (bundled file)
+        match self.load_cache_unchecked().await {
+            Ok(cache) => {
+                log::info!("Loaded word lists from local binary cache (unchecked)");
+                self.answer_words = Self::convert_to_words(cache.answer_words)?;
+                self.guess_words = Self::convert_to_words(cache.guess_words)?;
+                self.frequency = Some(cache.frequency);
+            }
+            Err(_) => {
+                // Try fresh-checked cache next
+                if let Ok(cache) = self.load_from_cache().await {
+                    log::info!("Loaded word lists from cache (fresh)");
                     self.answer_words = Self::convert_to_words(cache.answer_words)?;
                     self.guess_words = Self::convert_to_words(cache.guess_words)?;
+                    self.frequency = Some(cache.frequency);
+                } else {
+                    // Last resort: network download
+                    log::info!("Downloading fresh word lists");
+                    match self.download_words().await {
+                        Ok((answer_strings, guess_strings)) => {
+                            self.answer_words = Self::convert_to_words(answer_strings.clone())?;
+                            self.guess_words = Self::convert_to_words(guess_strings.clone())?;
+                            // Save to cache
+                            self.save_to_cache(&answer_strings, &guess_strings).await?;
+                            // After save, reload frequency from written cache
+                            if let Ok(cache) = self.load_cache_unchecked().await {
+                                self.frequency = Some(cache.frequency);
+                            }
+                        }
+                        Err(e) => {
+                            log::warn!("Download failed: {}. No local cache available.", e);
+                            return Err(e.into());
+                        }
+                    }
                 }
             }
         }
 
         // Ensure sorted unique internal lists for fast binary_search
-        self.answer_words.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+        self.answer_words.sort();
         self.answer_words.dedup();
-        self.guess_words.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+        self.guess_words.sort();
         self.guess_words.dedup();
 
         let mut all_words = Vec::with_capacity(self.answer_words.len() + self.guess_words.len());
         all_words.extend(self.answer_words.iter().cloned());
         all_words.extend(self.guess_words.iter().cloned());
-        all_words.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+        all_words.sort();
         all_words.dedup();
 
         Ok(all_words)
@@ -534,19 +672,12 @@ impl WordListProvider for FileWordListProvider {
 
     fn is_valid_guess(&self, word: &Word) -> bool {
         // Use binary search over sorted lists
-        self.guess_words
-            .binary_search_by(|w| w.as_str().cmp(word.as_str()))
-            .is_ok()
-            || self
-                .answer_words
-                .binary_search_by(|w| w.as_str().cmp(word.as_str()))
-                .is_ok()
+        self.guess_words.binary_search(word).is_ok()
+            || self.answer_words.binary_search(word).is_ok()
     }
 
     fn is_possible_answer(&self, word: &Word) -> bool {
-        self.answer_words
-            .binary_search_by(|w| w.as_str().cmp(word.as_str()))
-            .is_ok()
+        self.answer_words.binary_search(word).is_ok()
     }
 
     async fn refresh(&mut self, force: bool) -> Result<(usize, usize)> {

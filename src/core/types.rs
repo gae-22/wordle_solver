@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::fmt;
 
 /// Feedback types for Wordle guesses with enhanced type safety
@@ -131,39 +132,46 @@ impl std::fmt::Debug for Word {
     }
 }
 
-/// Newtype for feedback pattern with validation
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct FeedbackPattern(Vec<Feedback>);
+impl Ord for Word {
+    #[inline]
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.b.cmp(&other.b)
+    }
+}
+
+impl PartialOrd for Word {
+    #[inline]
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+/// Fixed-size feedback pattern for a 5-letter Wordle guess.
+///
+/// Stored as a stack-allocated [Feedback; 5] to avoid heap allocations in hot paths
+/// like entropy calculation and constraint checks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FeedbackPattern([Feedback; 5]);
 
 impl FeedbackPattern {
-    /// Create a new FeedbackPattern with validation
-    pub fn new(feedback: Vec<Feedback>) -> Result<Self, String> {
-        if feedback.len() != 5 {
-            return Err(format!(
-                "Feedback pattern must be exactly 5 elements, got {}",
-                feedback.len()
-            ));
-        }
-        Ok(FeedbackPattern(feedback))
-    }
-
-    /// Create from a result code string
+    /// Create from an exactly 5-length result code string (0/1/2)
     pub fn from_code_string(code: &str) -> Result<Self, String> {
         if code.len() != 5 {
             return Err("Code string must be exactly 5 characters".to_string());
         }
 
-        let feedback: Result<Vec<_>, _> = code
-            .chars()
-            .map(|c| Feedback::from_code(c).ok_or_else(|| format!("Invalid feedback code: {}", c)))
-            .collect();
-
-        feedback.map(|f| FeedbackPattern(f))
+        let mut arr = [Feedback::Absent; 5];
+        for (i, c) in code.chars().enumerate() {
+            arr[i] =
+                Feedback::from_code(c).ok_or_else(|| format!("Invalid feedback code: {}", c))?;
+        }
+        Ok(FeedbackPattern(arr))
     }
 
     /// Get the underlying feedback vector
+    #[inline]
     pub fn as_slice(&self) -> &[Feedback] {
-        &self.0
+        &self.0[..]
     }
 
     /// Convert to code string
@@ -172,11 +180,13 @@ impl FeedbackPattern {
     }
 
     /// Check if this pattern indicates a win (all correct)
+    #[inline]
     pub fn is_win(&self) -> bool {
         self.0.iter().all(|&f| f == Feedback::Correct)
     }
 
     /// Get the feedback at a specific position
+    #[inline]
     pub fn get(&self, index: usize) -> Option<Feedback> {
         self.0.get(index).copied()
     }
@@ -188,6 +198,12 @@ impl FeedbackPattern {
 
         // Higher scores for more informative patterns
         (correct_count * 2 + present_count) as f64
+    }
+
+    /// Construct directly from an array (no validation needed)
+    #[inline]
+    pub fn from_array(arr: [Feedback; 5]) -> Self {
+        FeedbackPattern(arr)
     }
 }
 

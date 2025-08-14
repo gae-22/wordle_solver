@@ -45,7 +45,7 @@ impl FeedbackGenerator for DefaultFeedbackGenerator {
                 }
             }
         }
-        FeedbackPattern::new(out.into_iter().collect()).expect("Generated feedback should be valid")
+        FeedbackPattern::from_array(out)
     }
 
     fn is_consistent(&self, word: &Word, constraints: &[crate::core::types::Guess]) -> bool {
