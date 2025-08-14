@@ -66,38 +66,50 @@ impl TuiApp {
         let container = Container::new();
         let mut state = TuiState::new();
 
-        // Always refresh word lists on interactive start
-        state.add_log(
-            LogLevel::Info,
-            "Refreshing word lists from remote sources...".to_string(),
-        );
-        match container.create_word_list_provider() {
-            Ok(mut provider) => match provider.refresh(true).await {
-                Ok((answers, guesses)) => {
-                    state.add_log(
-                        LogLevel::Info,
-                        format!(
-                            "Word lists updated. Answers: {}, Guesses: {}",
-                            answers, guesses
-                        ),
-                    );
-                }
+        // Optionally refresh word lists on interactive start
+        // Controlled by WORDLE_REFRESH_ON_START=1
+        if std::env::var("WORDLE_REFRESH_ON_START")
+            .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE"))
+            .unwrap_or(false)
+        {
+            state.add_log(
+                LogLevel::Info,
+                "Refreshing word lists from remote sources...".to_string(),
+            );
+            match container.create_word_list_provider() {
+                Ok(mut provider) => match provider.refresh(true).await {
+                    Ok((answers, guesses)) => {
+                        state.add_log(
+                            LogLevel::Info,
+                            format!(
+                                "Word lists updated. Answers: {}, Guesses: {}",
+                                answers, guesses
+                            ),
+                        );
+                    }
+                    Err(e) => {
+                        state.add_log(
+                            LogLevel::Warning,
+                            format!(
+                                "Failed to refresh word lists: {} (using cache if available)",
+                                e
+                            ),
+                        );
+                    }
+                },
                 Err(e) => {
                     state.add_log(
                         LogLevel::Warning,
-                        format!(
-                            "Failed to refresh word lists: {} (using cache if available)",
-                            e
-                        ),
+                        format!("Could not create word list provider: {}", e),
                     );
                 }
-            },
-            Err(e) => {
-                state.add_log(
-                    LogLevel::Warning,
-                    format!("Could not create word list provider: {}", e),
-                );
             }
+        } else {
+            state.add_log(
+                LogLevel::Info,
+                "Using existing cached word lists (set WORDLE_REFRESH_ON_START=1 to refresh)."
+                    .to_string(),
+            );
         }
 
         // Create application service after refresh so it picks up fresh cache

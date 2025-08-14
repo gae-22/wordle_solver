@@ -509,8 +509,15 @@ impl WordListProvider for FileWordListProvider {
             }
         }
 
-        let mut all_words = self.answer_words.clone();
-        all_words.extend(self.guess_words.clone());
+        // Ensure sorted unique internal lists for fast binary_search
+        self.answer_words.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+        self.answer_words.dedup();
+        self.guess_words.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+        self.guess_words.dedup();
+
+        let mut all_words = Vec::with_capacity(self.answer_words.len() + self.guess_words.len());
+        all_words.extend(self.answer_words.iter().cloned());
+        all_words.extend(self.guess_words.iter().cloned());
         all_words.sort_by(|a, b| a.as_str().cmp(b.as_str()));
         all_words.dedup();
 
@@ -526,11 +533,20 @@ impl WordListProvider for FileWordListProvider {
     }
 
     fn is_valid_guess(&self, word: &Word) -> bool {
-        self.guess_words.contains(word) || self.answer_words.contains(word)
+        // Use binary search over sorted lists
+        self.guess_words
+            .binary_search_by(|w| w.as_str().cmp(word.as_str()))
+            .is_ok()
+            || self
+                .answer_words
+                .binary_search_by(|w| w.as_str().cmp(word.as_str()))
+                .is_ok()
     }
 
     fn is_possible_answer(&self, word: &Word) -> bool {
-        self.answer_words.contains(word)
+        self.answer_words
+            .binary_search_by(|w| w.as_str().cmp(word.as_str()))
+            .is_ok()
     }
 
     async fn refresh(&mut self, force: bool) -> Result<(usize, usize)> {

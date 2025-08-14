@@ -1,14 +1,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use wordle_rust::{
-    Command,
-    CommandExecutor,
-    CommandResult,
-    Container,
-    Word,
-    WordListProvider, // bring trait into scope for .refresh()
-    core::types::FeedbackPattern,
-    run_tui,
+    Command, CommandExecutor, CommandResult, Container, Word, core::types::FeedbackPattern, run_tui,
 };
 
 #[derive(Parser)]
@@ -78,25 +71,6 @@ async fn main() -> Result<()> {
 
 async fn run_interactive_mode() -> Result<()> {
     log::info!("Starting modern TUI mode...");
-    // Refresh word lists before starting the TUI so the session uses the latest data
-    {
-        let mut provider = wordle_rust::FileWordListProvider::new();
-        let cache_path = provider.cache_path().to_string();
-        match provider.refresh(true).await {
-            Ok((a, g)) => {
-                println!(
-                    "🔄 Word lists refreshed (Answers: {}, Guesses: {}) -> {}",
-                    a, g, cache_path
-                );
-            }
-            Err(e) => {
-                eprintln!(
-                    "⚠️  Failed to refresh word lists: {} (using existing cache if available at {})",
-                    e, cache_path
-                );
-            }
-        }
-    }
 
     // Run the new TUI application
     run_tui().await

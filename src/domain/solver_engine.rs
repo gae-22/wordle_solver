@@ -126,7 +126,12 @@ impl WordleSolver for DefaultWordleSolver {
 
     fn get_possible_words(&self, limit: Option<usize>) -> Vec<Word> {
         match limit {
-            Some(n) => self.possible_words.iter().take(n).cloned().collect(),
+            Some(n) => {
+                let cap = self.possible_words.len().min(n);
+                let mut v = Vec::with_capacity(cap);
+                v.extend(self.possible_words.iter().take(n).cloned());
+                v
+            }
             None => self.possible_words.clone(),
         }
     }

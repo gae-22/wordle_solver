@@ -52,9 +52,15 @@ impl fmt::Display for Feedback {
     }
 }
 
-/// Newtype for a 5-letter word with validation
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Word(String);
+/// Newtype for a 5-letter ASCII-lowercase word with validation.
+///
+/// Performance note: we store both the original string and a cached
+/// 5-byte array to avoid repeated conversions in hot paths (entropy/feedback).
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct Word {
+    s: String,
+    b: [u8; 5],
+}
 
 impl Word {
     /// Create a new Word with validation
@@ -70,7 +76,10 @@ impl Word {
             return Err("Word must contain only lowercase ASCII letters".to_string());
         }
 
-        Ok(Word(word))
+        // Safe: validated ASCII-lowercase and len == 5
+        let mut arr = [0u8; 5];
+        arr.copy_from_slice(word.as_bytes());
+        Ok(Word { s: word, b: arr })
     }
 
     /// Create a Word from a string slice (convenience method)
@@ -80,29 +89,45 @@ impl Word {
 
     /// Get the underlying string
     pub fn as_str(&self) -> &str {
-        &self.0
+        &self.s
+    }
+
+    /// Get the underlying 5 bytes (ASCII lowercase)
+    #[inline]
+    pub fn bytes(&self) -> &[u8; 5] {
+        &self.b
     }
 
     /// Get the character at the specified position
     pub fn char_at(&self, position: usize) -> Option<char> {
-        self.0.chars().nth(position)
+        if position < 5 {
+            Some(self.b[position] as char)
+        } else {
+            None
+        }
     }
 
     /// Get all characters as a vector
     pub fn chars(&self) -> Vec<char> {
-        self.0.chars().collect()
+        self.b.iter().map(|&u| u as char).collect()
     }
 }
 
 impl fmt::Display for Word {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
+        write!(f, "{}", self.s)
     }
 }
 
 impl AsRef<str> for Word {
     fn as_ref(&self) -> &str {
-        &self.0
+        &self.s
+    }
+}
+
+impl std::fmt::Debug for Word {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("Word").field(&self.s).finish()
     }
 }
 

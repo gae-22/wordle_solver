@@ -51,12 +51,7 @@ impl CachedEntropyCalculator {
 
     #[inline]
     fn feedback_index(&self, guess: &Word, target: &Word) -> usize {
-        let gb = guess.as_str().as_bytes();
-        let tb = target.as_str().as_bytes();
-        // Safety: words are validated 5-letter ASCII lowercase
-        let gb5: &[u8; 5] = gb.try_into().expect("word length must be 5");
-        let tb5: &[u8; 5] = tb.try_into().expect("word length must be 5");
-        self.feedback_index_bytes(gb5, tb5)
+        self.feedback_index_bytes(guess.bytes(), target.bytes())
     }
 
     /// Calculate information gain based on expected partition sizes

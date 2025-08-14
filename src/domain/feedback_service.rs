@@ -21,8 +21,8 @@ impl Default for DefaultFeedbackGenerator {
 
 impl FeedbackGenerator for DefaultFeedbackGenerator {
     fn generate_feedback(&self, guess: &Word, target: &Word) -> FeedbackPattern {
-        let gb = guess.as_str().as_bytes();
-        let tb = target.as_str().as_bytes();
+        let gb = guess.bytes();
+        let tb = target.bytes();
         let mut out = [Feedback::Absent; 5];
         let mut used = [false; 5];
 
