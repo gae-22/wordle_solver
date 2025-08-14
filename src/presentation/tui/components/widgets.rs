@@ -3,7 +3,7 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Gauge, List, ListItem, Paragraph, Wrap},
+    widgets::{Block, BorderType, Borders, Clear, Gauge, List, ListItem, Paragraph, Wrap},
 };
 
 use crate::presentation::tui::mode::InteractionMode;
@@ -31,7 +31,7 @@ impl Colors {
 
 /// Render the main title bar
 pub fn render_title(frame: &mut Frame, area: Rect) {
-    let title = Paragraph::new("🎯 Modern Wordle Solver")
+    let title = Paragraph::new("🎯 Modern Wordle Solver · Press 'h' for help")
         .style(
             Style::default()
                 .fg(Colors::ACCENT)
@@ -40,6 +40,7 @@ pub fn render_title(frame: &mut Frame, area: Rect) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(Colors::ACCENT))
                 .title(" Wordle AI ")
                 .title_style(
@@ -74,6 +75,7 @@ pub fn render_input(frame: &mut Frame, area: Rect, state: &TuiState) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(Colors::ACCENT))
                 .title(" Enter Your Guess ")
                 .title_style(Style::default().fg(Colors::ACCENT)),
@@ -98,6 +100,7 @@ pub fn render_suggestion(frame: &mut Frame, area: Rect, state: &TuiState) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(Colors::WARNING))
                 .title(" AI Suggestion ")
                 .title_style(Style::default().fg(Colors::WARNING)),
@@ -131,6 +134,7 @@ pub fn render_history(frame: &mut Frame, area: Rect, state: &TuiState) {
     let history = List::new(history_items).block(
         Block::default()
             .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(Colors::INFO))
             .title(format!(" Guess History ({}) ", state.guess_history.len()))
             .title_style(Style::default().fg(Colors::INFO)),
@@ -191,6 +195,7 @@ pub fn render_stats(frame: &mut Frame, area: Rect, state: &TuiState) {
     let stats = Paragraph::new(stats_text).block(
         Block::default()
             .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(Colors::SUCCESS))
             .title(" Statistics ")
             .title_style(Style::default().fg(Colors::SUCCESS)),
@@ -219,6 +224,7 @@ pub fn render_remaining_words(frame: &mut Frame, area: Rect, state: &TuiState) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(Colors::MUTED))
                 .title(" Possible Words (Sample) ")
                 .title_style(Style::default().fg(Colors::MUTED)),
@@ -292,6 +298,7 @@ pub fn render_help(frame: &mut Frame, area: Rect, state: &TuiState) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(Colors::INFO))
                 .title(help_title)
                 .title_style(
@@ -318,7 +325,12 @@ pub fn render_status(frame: &mut Frame, area: Rect, state: &TuiState) {
 
         let status_widget = Paragraph::new(status.text.clone())
             .style(style.add_modifier(Modifier::BOLD))
-            .block(Block::default().borders(Borders::ALL).border_style(style));
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .border_style(style),
+            );
 
         frame.render_widget(status_widget, area);
     }
@@ -351,6 +363,7 @@ pub fn render_logs(frame: &mut Frame, area: Rect, state: &TuiState) {
     let logs = List::new(log_items).block(
         Block::default()
             .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(Colors::MUTED))
             .title(" Logs ")
             .title_style(Style::default().fg(Colors::MUTED)),
@@ -373,6 +386,7 @@ pub fn render_progress(frame: &mut Frame, area: Rect, state: &TuiState) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(Colors::ACCENT))
                 .title(" Solving Progress ")
                 .title_style(Style::default().fg(Colors::ACCENT)),
@@ -386,24 +400,27 @@ pub fn render_progress(frame: &mut Frame, area: Rect, state: &TuiState) {
 
 /// Helper function to colorize feedback text
 fn colorize_feedback(feedback: &str, word: &str) -> Line<'static> {
+    // Render letters as rounded "tiles" with colored backgrounds
     let mut spans = Vec::new();
 
     for (c, f) in word.chars().zip(feedback.chars()) {
-        let color = match f {
+        let bg = match f {
             '2' => Colors::CORRECT,
             '1' => Colors::PRESENT,
             '0' => Colors::ABSENT,
-            _ => Colors::FOREGROUND,
+            _ => Colors::MUTED,
         };
 
         spans.push(Span::styled(
-            c.to_uppercase().to_string(),
-            Style::default().fg(color).add_modifier(Modifier::BOLD),
+            format!(" {} ", c.to_uppercase()),
+            Style::default()
+                .fg(Color::Black)
+                .bg(bg)
+                .add_modifier(Modifier::BOLD),
         ));
-        spans.push(Span::raw(" ".to_string()));
+        spans.push(Span::raw(" "));
     }
 
-    // Remove the last space
     if !spans.is_empty() {
         spans.pop();
     }
@@ -421,27 +438,43 @@ pub fn render_feedback_input(
 ) {
     let title = format!(" Feedback for '{}' ", current_guess.to_uppercase());
 
-    // Create display string with cursor
-    let mut display = feedback_input.to_string();
-    if cursor_pos <= display.len() {
-        display.insert(cursor_pos, '█');
+    // Build a line of 5 tiles representing feedback digits with a blinking cursor tile
+    let mut spans: Vec<Span> = Vec::with_capacity(9);
+    for i in 0..5 {
+        let (label, bg) = match feedback_input.chars().nth(i) {
+            Some('2') => (" 2 ", Colors::CORRECT),
+            Some('1') => (" 1 ", Colors::PRESENT),
+            Some('0') => (" 0 ", Colors::ABSENT),
+            _ => ("   ", Colors::MUTED),
+        };
+
+        let mut style = Style::default()
+            .fg(Color::Black)
+            .bg(bg)
+            .add_modifier(Modifier::BOLD);
+        let mut text = label.to_string();
+
+        // Visual cursor: invert colors on the current tile
+        if i == cursor_pos.min(4) && feedback_input.len() < 5 {
+            style = Style::default()
+                .fg(Colors::ACCENT)
+                .bg(Color::Black)
+                .add_modifier(Modifier::BOLD | Modifier::REVERSED);
+            text = " ▌ ".to_string();
+        }
+
+        spans.push(Span::styled(text, style));
+        if i < 4 {
+            spans.push(Span::raw(" "));
+        }
     }
 
-    // Pad with underscores to show remaining positions
-    let remaining = 5 - feedback_input.len();
-    if remaining > 0 {
-        display.push_str(&"_".repeat(remaining));
-    }
-
-    let feedback_widget = Paragraph::new(display)
-        .style(
-            Style::default()
-                .fg(Colors::WARNING)
-                .add_modifier(Modifier::BOLD),
-        )
+    let feedback_widget = Paragraph::new(Line::from(spans))
+        .style(Style::default().fg(Colors::FOREGROUND))
         .block(
             Block::default()
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(Colors::WARNING))
                 .title(title)
                 .title_style(
@@ -513,6 +546,7 @@ pub fn render_feedback_help(frame: &mut Frame, area: Rect) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(Colors::INFO))
                 .title(" Feedback Help ")
                 .title_style(Style::default().fg(Colors::INFO)),
@@ -553,10 +587,68 @@ pub fn render_mode_indicator(frame: &mut Frame, area: Rect, state: &TuiState) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(mode_color))
                 .title(format!(" {} Mode ", mode_text))
                 .title_style(Style::default().fg(mode_color).add_modifier(Modifier::BOLD)),
         );
 
     frame.render_widget(mode_indicator, area);
+}
+
+/// Render a compact footer command bar with common shortcuts
+pub fn render_footer(frame: &mut Frame, area: Rect, state: &TuiState) {
+    let mode = state.interaction_mode();
+    let key = |k: &str| {
+        Span::styled(
+            format!(" {} ", k),
+            Style::default()
+                .fg(Colors::ACCENT)
+                .add_modifier(Modifier::BOLD),
+        )
+    };
+    let sep = Span::styled("  •  ", Style::default().fg(Colors::MUTED));
+
+    let mut spans: Vec<Span> = Vec::new();
+    spans.push(key("Esc/Tab"));
+    spans.push(Span::styled(
+        " Switch Mode",
+        Style::default().fg(Colors::MUTED),
+    ));
+    spans.push(sep.clone());
+    spans.push(key("Enter"));
+    spans.push(Span::styled(" Submit", Style::default().fg(Colors::MUTED)));
+    spans.push(sep.clone());
+    spans.push(key("h"));
+    spans.push(Span::styled(" Help", Style::default().fg(Colors::MUTED)));
+    spans.push(sep.clone());
+    spans.push(key("f"));
+    spans.push(Span::styled(" First", Style::default().fg(Colors::MUTED)));
+    spans.push(sep.clone());
+    spans.push(key("s"));
+    spans.push(Span::styled(" Stats", Style::default().fg(Colors::MUTED)));
+    spans.push(sep.clone());
+    spans.push(key("r"));
+    spans.push(Span::styled(" Reset", Style::default().fg(Colors::MUTED)));
+    spans.push(sep);
+    spans.push(key("q"));
+    spans.push(Span::styled(" Quit", Style::default().fg(Colors::MUTED)));
+
+    // Mode hint at the end
+    spans.push(Span::styled(
+        format!("   [{} mode]", mode.name()),
+        Style::default()
+            .fg(Colors::INFO)
+            .add_modifier(Modifier::ITALIC),
+    ));
+
+    let footer = Paragraph::new(Line::from(spans))
+        .style(Style::default().fg(Colors::FOREGROUND))
+        .block(
+            Block::default()
+                .borders(Borders::TOP)
+                .border_style(Style::default().fg(Colors::MUTED)),
+        );
+
+    frame.render_widget(footer, area);
 }

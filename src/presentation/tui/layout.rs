@@ -5,9 +5,9 @@ use ratatui::{
 
 use crate::presentation::tui::{
     components::{
-        centered_rect, render_feedback_help, render_feedback_input, render_help, render_history,
-        render_input, render_logs, render_mode_indicator, render_progress, render_remaining_words,
-        render_stats, render_status, render_suggestion, render_title,
+        centered_rect, render_feedback_help, render_feedback_input, render_footer, render_help,
+        render_history, render_input, render_logs, render_mode_indicator, render_progress,
+        render_remaining_words, render_stats, render_status, render_suggestion, render_title,
     },
     feedback::FeedbackInputManager,
     state::TuiState,
@@ -35,6 +35,7 @@ impl LayoutManager {
                 Constraint::Length(3), // Suggestion
                 Constraint::Min(8),    // Main content area
                 Constraint::Length(3), // Status/Progress
+                Constraint::Length(1), // Footer
             ])
             .split(size);
 
@@ -101,6 +102,9 @@ impl LayoutManager {
             render_progress(frame, main_chunks[5], state);
         }
 
+        // Footer command bar
+        render_footer(frame, main_chunks[6], state);
+
         // Render help overlay if needed
         if state.should_show_help() {
             let help_area = centered_rect(80, 70, size);
@@ -123,6 +127,7 @@ impl LayoutManager {
                 Constraint::Length(3), // Input + Suggestion combined
                 Constraint::Min(6),    // Content
                 Constraint::Length(2), // Status
+                Constraint::Length(1), // Footer
             ])
             .split(size);
 
@@ -179,6 +184,9 @@ impl LayoutManager {
             render_progress(frame, main_chunks[3], state);
         }
 
+        // Footer
+        render_footer(frame, main_chunks[4], state);
+
         // Help overlay
         if state.should_show_help() {
             let help_area = centered_rect(90, 80, size);
@@ -201,6 +209,7 @@ impl LayoutManager {
                 Constraint::Length(3), // Input
                 Constraint::Min(4),    // Content (scrollable)
                 Constraint::Length(1), // Status
+                Constraint::Length(1), // Footer
             ])
             .split(size);
 
@@ -235,6 +244,9 @@ impl LayoutManager {
         if state.status_message.is_some() {
             render_status(frame, main_chunks[3], state);
         }
+
+        // Footer (minimal)
+        render_footer(frame, main_chunks[4], state);
 
         // Full-screen help
         if state.should_show_help() {
