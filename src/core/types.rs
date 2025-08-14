@@ -1,5 +1,6 @@
 use std::cmp::Ordering;
 use std::fmt;
+use std::str::FromStr;
 
 /// Feedback types for Wordle guesses with enhanced type safety
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -64,9 +65,12 @@ pub struct Word {
 }
 
 impl Word {
+    /// Fixed Wordle word length
+    pub const LENGTH: usize = 5;
+
     /// Create a new Word with validation
     pub fn new(word: String) -> Result<Self, String> {
-        if word.len() != 5 {
+        if word.len() != Self::LENGTH {
             return Err(format!(
                 "Word must be exactly 5 characters, got {}",
                 word.len()
@@ -78,7 +82,7 @@ impl Word {
         }
 
         // Safe: validated ASCII-lowercase and len == 5
-        let mut arr = [0u8; 5];
+        let mut arr = [0u8; Self::LENGTH];
         arr.copy_from_slice(word.as_bytes());
         Ok(Word { s: word, b: arr })
     }
@@ -101,7 +105,7 @@ impl Word {
 
     /// Get the character at the specified position
     pub fn char_at(&self, position: usize) -> Option<char> {
-        if position < 5 {
+        if position < Self::LENGTH {
             Some(self.b[position] as char)
         } else {
             None
@@ -143,6 +147,23 @@ impl PartialOrd for Word {
     #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
+    }
+}
+
+impl FromStr for Word {
+    type Err = String;
+
+    /// Parse a Word from a string. Use `"apple".parse::<Word>()`.
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Word::from_str(s)
+    }
+}
+
+impl TryFrom<&str> for Word {
+    type Error = String;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        Word::from_str(value)
     }
 }
 

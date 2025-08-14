@@ -363,22 +363,19 @@ impl FileWordListProvider {
     /// Force refresh the word lists cache from remote sources.
     /// When `force` is false, it will skip if the cache is still fresh.
     pub async fn refresh_cache(&mut self, force: bool) -> Result<(usize, usize)> {
-        let fresh = match self.load_from_cache().await {
-            Ok(_) => true,
-            Err(_) => false,
-        };
+    let fresh = self.load_from_cache().await.is_ok();
         if fresh && !force {
             log::info!("Cache is fresh; skipping refresh");
             let cache = self.load_from_cache().await?;
-            self.answer_words = Self::convert_to_words(cache.answer_words.clone())?;
-            self.guess_words = Self::convert_to_words(cache.guess_words.clone())?;
+            self.answer_words = Self::convert_to_words(cache.answer_words)?;
+            self.guess_words = Self::convert_to_words(cache.guess_words)?;
             return Ok((self.answer_words.len(), self.guess_words.len()));
         }
 
         let (answer_strings, guess_strings) = self.download_words().await?;
         self.save_to_cache(&answer_strings, &guess_strings).await?;
-        self.answer_words = Self::convert_to_words(answer_strings.clone())?;
-        self.guess_words = Self::convert_to_words(guess_strings.clone())?;
+        self.answer_words = Self::convert_to_words(answer_strings)?;
+        self.guess_words = Self::convert_to_words(guess_strings)?;
         Ok((self.answer_words.len(), self.guess_words.len()))
     }
 }

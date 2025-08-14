@@ -1,5 +1,38 @@
 use crate::core::{traits::EntropyCalculator, types::Word};
 
+#[inline]
+fn feedback_index_bytes_common(guess_b: &[u8; 5], target_b: &[u8; 5]) -> usize {
+    let mut used = [false; 5];
+    let mut f = [0u8; 5];
+
+    // Greens
+    for i in 0..5 {
+        if guess_b[i] == target_b[i] {
+            f[i] = 2;
+            used[i] = true;
+        }
+    }
+    // Yellows
+    for i in 0..5 {
+        if f[i] == 0 {
+            let g = guess_b[i];
+            for j in 0..5 {
+                if !used[j] && g == target_b[j] {
+                    f[i] = 1;
+                    used[j] = true;
+                    break;
+                }
+            }
+        }
+    }
+    // Encode base-3 little-endian
+    (f[0] as usize)
+        + (f[1] as usize) * 3
+        + (f[2] as usize) * 9
+        + (f[3] as usize) * 27
+        + (f[4] as usize) * 81
+}
+
 /// High-performance entropy calculator with caching
 #[derive(Debug)]
 pub struct CachedEntropyCalculator {}
@@ -13,35 +46,7 @@ impl CachedEntropyCalculator {
     /// Encodes feedback as base-3 digits (0=Absent,1=Present,2=Correct) with position-weighted digits.
     #[inline]
     fn feedback_index_bytes(&self, guess_b: &[u8; 5], target_b: &[u8; 5]) -> usize {
-        let mut used = [false; 5];
-        let mut f = [0u8; 5];
-
-        // Greens
-        for i in 0..5 {
-            if guess_b[i] == target_b[i] {
-                f[i] = 2;
-                used[i] = true;
-            }
-        }
-        // Yellows
-        for i in 0..5 {
-            if f[i] == 0 {
-                let g = guess_b[i];
-                for j in 0..5 {
-                    if !used[j] && g == target_b[j] {
-                        f[i] = 1;
-                        used[j] = true;
-                        break;
-                    }
-                }
-            }
-        }
-        // Encode base-3 little-endian
-        (f[0] as usize)
-            + (f[1] as usize) * 3
-            + (f[2] as usize) * 9
-            + (f[3] as usize) * 27
-            + (f[4] as usize) * 81
+        feedback_index_bytes_common(guess_b, target_b)
     }
 
     #[inline]
@@ -82,10 +87,7 @@ impl Default for CachedEntropyCalculator {
 
 impl EntropyCalculator for CachedEntropyCalculator {
     fn calculate_entropy(&self, guess: &Word, possible_words: &[Word]) -> f64 {
-        if possible_words.is_empty() {
-            return 0.0;
-        }
-        if possible_words.len() == 1 {
+        if possible_words.len() <= 1 {
             return 0.0;
         }
         let mut counts = [0usize; 243];
@@ -135,32 +137,7 @@ impl SimpleEntropyCalculator {
 
     #[inline]
     fn feedback_index_bytes(&self, guess_b: &[u8; 5], target_b: &[u8; 5]) -> usize {
-        // Same algorithm as CachedEntropyCalculator
-        let mut used = [false; 5];
-        let mut f = [0u8; 5];
-        for i in 0..5 {
-            if guess_b[i] == target_b[i] {
-                f[i] = 2;
-                used[i] = true;
-            }
-        }
-        for i in 0..5 {
-            if f[i] == 0 {
-                let g = guess_b[i];
-                for j in 0..5 {
-                    if !used[j] && g == target_b[j] {
-                        f[i] = 1;
-                        used[j] = true;
-                        break;
-                    }
-                }
-            }
-        }
-        (f[0] as usize)
-            + (f[1] as usize) * 3
-            + (f[2] as usize) * 9
-            + (f[3] as usize) * 27
-            + (f[4] as usize) * 81
+        feedback_index_bytes_common(guess_b, target_b)
     }
 
     #[inline]

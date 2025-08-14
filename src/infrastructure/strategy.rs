@@ -45,12 +45,13 @@ impl<E: EntropyCalculator> SolvingStrategy for EntropyBasedStrategy<E> {
             return Err(SolverError::NoCandidates.into());
         }
 
-        // Use information gain for better performance in endgame
+    // Use information gain for better performance in endgame
         let best_word = if possible_words.len() <= 3 {
             // When few words remain, prefer words that are possible answers
+            let set: std::collections::HashSet<&Word> = possible_words.iter().collect();
             let answer_candidates: Vec<_> = candidates
                 .iter()
-                .filter(|word| possible_words.contains(word))
+                .filter(|word| set.contains(*word))
                 .cloned()
                 .collect();
 
@@ -67,9 +68,10 @@ impl<E: EntropyCalculator> SolvingStrategy for EntropyBasedStrategy<E> {
             }
         } else {
             // Optional heuristic prefilter (disabled by default to preserve accuracy)
-            let use_prefilter = std::env::var("WORDLE_FAST_PREFILTER")
-                .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE"))
-                .unwrap_or(false);
+            let use_prefilter = {
+                let val = std::env::var("WORDLE_FAST_PREFILTER").unwrap_or_default();
+                matches!(val.as_str(), "1" | "true" | "TRUE" | "yes" | "on")
+            };
             if use_prefilter && possible_words.len() > 200 {
                 let filtered: Vec<_> = candidates
                     .iter()
@@ -332,14 +334,44 @@ impl<E: EntropyCalculator> HybridStrategy<E> {
         score
     }
 
-    fn calculate_hybrid_score(&self, word: &Word, possible_words: &[Word]) -> f64 {
+    fn calculate_hybrid_score(
+        &self,
+        word: &Word,
+        possible_words: &[Word],
+        pos_counts: &[[u32; 26]; 5],
+        denom: f64,
+    ) -> f64 {
         let entropy = self
             .entropy_calculator
             .calculate_entropy(word, possible_words);
 
-        // frequency: 文字頻度 + 位置頻度 + ビグラム簡易スコア
+        // frequency: letter frequency (unique letters only) + dynamic positional frequency + simple bigram
         let mut frequency = self.calculate_frequency_score(word);
-        // 位置頻度（answersから動的計算）
+        let b = word.bytes();
+        for pos in 0..5 {
+            frequency += pos_counts[pos][(b[pos] - b'a') as usize] as f64 / denom;
+        }
+        let mut bigram_bonus = 0.0;
+        for i in 0..4 {
+            let count = possible_words
+                .iter()
+                .filter(|w| {
+                    let wb = w.bytes();
+                    wb[i] == b[i] && wb[i + 1] == b[i + 1]
+                })
+                .count();
+            bigram_bonus += (count as f64) / denom;
+        }
+        frequency += bigram_bonus;
+
+        // Weight entropy more heavily when many words remain
+        let n = possible_words.len();
+        let entropy_weight = if n > self.use_entropy_threshold { 0.8 } else if n > 10 { 0.6 } else if n > 3 { 0.45 } else { 0.25 };
+        let frequency_weight = 1.0 - entropy_weight;
+        entropy * entropy_weight + frequency * frequency_weight
+    }
+
+    fn build_pos_counts(&self, possible_words: &[Word]) -> [[u32; 26]; 5] {
         let mut pos_counts = [[0u32; 26]; 5];
         for w in possible_words {
             let b = w.bytes();
@@ -350,39 +382,7 @@ impl<E: EntropyCalculator> HybridStrategy<E> {
                 }
             }
         }
-        let b = word.bytes();
-        for pos in 0..5 {
-            frequency +=
-                pos_counts[pos][(b[pos] - b'a') as usize] as f64 / possible_words.len() as f64;
-        }
-        // ビグラム（簡易）
-        let mut bigram_bonus = 0.0;
-        for i in 0..4 {
-            let count = possible_words
-                .iter()
-                .filter(|w| {
-                    let wb = w.bytes();
-                    wb[i] == b[i] && wb[i + 1] == b[i + 1]
-                })
-                .count();
-            bigram_bonus += (count as f64) / (possible_words.len() as f64);
-        }
-        frequency += bigram_bonus;
-
-        // Weight entropy more heavily when many words remain
-        let n = possible_words.len();
-        let entropy_weight = if n > self.use_entropy_threshold {
-            0.8
-        } else if n > 10 {
-            0.6
-        } else if n > 3 {
-            0.45
-        } else {
-            0.25
-        };
-        let frequency_weight = 1.0 - entropy_weight;
-
-        entropy * entropy_weight + frequency * frequency_weight
+        pos_counts
     }
 }
 
@@ -400,12 +400,14 @@ impl<E: EntropyCalculator> SolvingStrategy for HybridStrategy<E> {
             return Err(SolverError::NoCandidates.into());
         }
 
-        // Find the best guess using hybrid scoring
-        let best_candidate = candidates
+    // Find the best guess using hybrid scoring; precompute counts once
+    let pos_counts = self.build_pos_counts(possible_words);
+    let denom = possible_words.len() as f64;
+    let best_candidate = candidates
             .iter()
             .max_by(|a, b| {
-                let score_a = self.calculate_hybrid_score(a, possible_words);
-                let score_b = self.calculate_hybrid_score(b, possible_words);
+        let score_a = self.calculate_hybrid_score(a, possible_words, &pos_counts, denom);
+        let score_b = self.calculate_hybrid_score(b, possible_words, &pos_counts, denom);
                 score_a
                     .partial_cmp(&score_b)
                     .unwrap_or(std::cmp::Ordering::Equal)
@@ -425,12 +427,14 @@ impl<E: EntropyCalculator> SolvingStrategy for HybridStrategy<E> {
         candidates: &[Word],
         limit: usize,
     ) -> Vec<(Word, f64)> {
+        let pos_counts = self.build_pos_counts(possible_words);
+        let denom = possible_words.len() as f64;
         let mut scored_candidates: Vec<_> = candidates
             .iter()
             .map(|word| {
                 (
                     word.clone(),
-                    self.calculate_hybrid_score(word, possible_words),
+                    self.calculate_hybrid_score(word, possible_words, &pos_counts, denom),
                 )
             })
             .collect();

@@ -23,8 +23,8 @@ impl FeedbackGenerator for DefaultFeedbackGenerator {
     fn generate_feedback(&self, guess: &Word, target: &Word) -> FeedbackPattern {
         let gb = guess.bytes();
         let tb = target.bytes();
-        let mut out = [Feedback::Absent; 5];
-        let mut used = [false; 5];
+    let mut out = [Feedback::Absent; 5];
+    let mut used = [false; 5];
 
         // Greens
         for i in 0..5 {
@@ -36,8 +36,10 @@ impl FeedbackGenerator for DefaultFeedbackGenerator {
         // Yellows
         for i in 0..5 {
             if matches!(out[i], Feedback::Absent) {
+                // scan remaining targets for the letter
+                let g = gb[i];
                 for j in 0..5 {
-                    if !used[j] && gb[i] == tb[j] {
+                    if !used[j] && g == tb[j] {
                         out[i] = Feedback::Present;
                         used[j] = true;
                         break;

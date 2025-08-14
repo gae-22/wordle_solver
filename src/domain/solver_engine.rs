@@ -45,16 +45,7 @@ impl DefaultWordleSolver {
         candidates.sort();
         candidates.dedup();
 
-        // If provider is FileWordListProvider, and frequency is available, update default first guess via strategy if it supports it.
-        // We won't downcast the boxed trait; instead, we compute best first guess here and ignore if not applicable.
-        let initial_guess =
-            if let Some(freq_guess) = Self::select_initial_guess_from_frequency(&possible_words) {
-                Some(freq_guess)
-            } else {
-                None
-            };
-
-        let mut solver = Self {
+    let solver = Self {
             word_list_provider,
             strategy,
             constraint_filter,
@@ -63,25 +54,10 @@ impl DefaultWordleSolver {
             guess_history: Vec::new(),
         };
 
-        if let Some(g) = initial_guess {
-            // Best-effort: if strategy exposes get_best_first_guess only, we can't set it.
-            // So we pre-pend a guess suggestion by returning through get_best_first_guess later.
-            // For simplicity, we store it by pushing to candidates front if not present.
-            let mut c = Arc::try_unwrap(solver.candidates).unwrap_or_else(|arc| (*arc).clone());
-            if !c.contains(&g) {
-                c.insert(0, g.clone());
-            } else {
-                // Move to front
-                if let Some(pos) = c.iter().position(|w| w == &g) {
-                    c.swap(0, pos);
-                }
-            }
-            solver.candidates = Arc::new(c);
-        }
-
         Ok(solver)
     }
 
+    #[allow(dead_code)]
     fn select_initial_guess_from_frequency(answers: &[Word]) -> Option<Word> {
         if answers.is_empty() {
             return None;
@@ -180,10 +156,7 @@ impl WordleSolver for DefaultWordleSolver {
     fn get_possible_words(&self, limit: Option<usize>) -> Vec<Word> {
         match limit {
             Some(n) => {
-                let cap = self.possible_words.len().min(n);
-                let mut v = Vec::with_capacity(cap);
-                v.extend(self.possible_words.iter().take(n).cloned());
-                v
+                self.possible_words.iter().take(n).cloned().collect()
             }
             None => self.possible_words.clone(),
         }
@@ -210,15 +183,12 @@ impl WordleSolver for DefaultWordleSolver {
 
     fn get_statistics(&self) -> SolverStatistics {
         let sample_words = self.get_possible_words(Some(10));
-        // Can't call get_top_candidates here due to borrowing rules, so return empty
-        let entropy_scores = Vec::new();
-
         SolverStatistics {
             total_guesses: self.guess_history.len(),
             remaining_words: self.possible_words.len(),
             is_solved: self.is_solved(),
             possible_words_sample: sample_words,
-            entropy_scores,
+            entropy_scores: Vec::new(),
         }
     }
 
