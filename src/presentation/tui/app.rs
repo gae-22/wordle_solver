@@ -13,7 +13,7 @@ use crate::{
     application::{WordleApplicationService, commands::CommandExecutor},
     core::types::{FeedbackPattern, Word},
     presentation::tui::{
-        events::{EventLoop, KeyAction},
+        events::{EventLoop, KeyAction, TuiEvent},
         feedback::FeedbackInputManager,
         layout::{LayoutManager, LayoutPreset},
         state::{LogLevel, MessageType, TuiState},
@@ -147,11 +147,18 @@ impl TuiApp {
                 event_result = self.event_loop.next_event() => {
                     match event_result {
                         Ok(event) => {
-                            // Check if user is currently typing (has partial input)
-                            let is_typing = !self.state.input.is_empty();
-                            let current_mode = self.state.interaction_mode();
-                            let action = self.event_loop.process_event(event, current_mode, is_typing);
-                            self.handle_action(action).await?;
+                            // If solved, exit on any key press
+                            if self.state.is_solved {
+                                if let TuiEvent::Key(_) = event {
+                                    self.should_quit = true;
+                                }
+                            } else {
+                                // Normal event processing
+                                let is_typing = !self.state.input.is_empty();
+                                let current_mode = self.state.interaction_mode();
+                                let action = self.event_loop.process_event(event, current_mode, is_typing);
+                                self.handle_action(action).await?;
+                            }
                         }
                         Err(e) => {
                             self.state.add_log(
@@ -474,7 +481,7 @@ impl TuiApp {
                 self.state.set_solved(true);
                 self.state.set_status(
                     format!(
-                        "🎉 Congratulations! You solved it with '{}'!",
+                        "🎉 Congratulations! You solved it with '{}'!  Press any key to exit.",
                         word.to_uppercase()
                     ),
                     MessageType::Success,
