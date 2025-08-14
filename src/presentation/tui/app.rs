@@ -560,7 +560,64 @@ impl Drop for TuiApp {
 /// Helper function to run the TUI application
 pub async fn run_tui() -> Result<()> {
     let mut app = TuiApp::new().await?;
-    app.run().await
+    let run_result = app.run().await;
+
+    // Capture needed info before dropping the app (which tears down the TUI)
+    let solved = app.state.is_solved;
+    let history: Vec<(String, String)> = app
+        .state
+        .guess_history
+        .iter()
+        .map(|e| (e.word.clone(), e.feedback.clone()))
+        .collect();
+
+    // Explicitly drop TUI to leave alternate screen and raw mode
+    drop(app);
+
+    // Print after returning to the normal terminal screen
+    if solved {
+        // Show only per-guess feedback like real Wordle (no legend/message/attempts)
+        if !history.is_empty() {
+            print_history_summary(&history);
+        }
+    }
+
+    run_result
+}
+
+fn print_history_summary(rows: &[(String, String)]) {
+    println!("");
+    for (i, (word, feedback)) in rows.iter().enumerate() {
+        let squares = format_feedback_squares(feedback);
+        println!("{:>2}) {:<8} {}", i + 1, word.to_uppercase(), squares);
+    }
+    println!();
+}
+
+fn format_feedback_squares(feedback_code: &str) -> String {
+    // Use fixed-width ANSI background-colored cells to avoid emoji width issues.
+    // Each cell is two spaces with background color; separated by one normal space.
+    const RESET: &str = "\x1b[0m";
+    // Basic, widely-supported colors
+    const GREEN_BG: &str = "\x1b[42m"; // HIT
+    const YELLOW_BG: &str = "\x1b[43m"; // BITE
+    const GRAY_BG: &str = "\x1b[100m"; // ABSENT (bright black)
+
+    let mut out = String::with_capacity(5 * (2 + 1) * 4); // rough capacity accounting for ANSI
+    for (idx, ch) in feedback_code.chars().take(5).enumerate() {
+        if idx > 0 {
+            out.push(' ');
+        }
+        let bg = match ch {
+            '2' => GREEN_BG,
+            '1' => YELLOW_BG,
+            _ => GRAY_BG,
+        };
+        out.push_str(bg);
+        out.push_str("  ");
+        out.push_str(RESET);
+    }
+    out
 }
 
 #[cfg(test)]

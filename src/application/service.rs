@@ -180,7 +180,11 @@ impl WordleApplicationService {
             Ok(())
         })?;
 
-        self.update_state_with_solver_info()
+        self.update_state_with_solver_info()?;
+
+        // TUIでの通常プレイでは、クリア表示はTUI終了後に行うためここでは出力しない
+
+        Ok(())
     }
 }
 
