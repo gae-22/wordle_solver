@@ -21,6 +21,16 @@ pub trait WordListProvider: Send + Sync + std::fmt::Debug {
 
     /// Check if a word is a possible answer
     fn is_possible_answer(&self, word: &Word) -> bool;
+
+    /// Refresh the underlying word lists (optionally forcing a remote fetch)
+    async fn refresh(&mut self, _force: bool) -> Result<(usize, usize)> {
+        // Default implementation falls back to load_words when implementations
+        // don't override this method. We return sizes based on current state after load.
+        let _ = self.load_words().await?;
+        let answers = self.get_answer_words().len();
+        let guesses = self.get_guess_words().len();
+        Ok((answers, guesses))
+    }
 }
 
 /// Trait for solving strategies

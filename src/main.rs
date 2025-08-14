@@ -1,8 +1,14 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use wordle_rust::{
-    Command, CommandExecutor, CommandResult, Word, Container,
-    core::types::FeedbackPattern, run_tui,
+    Command,
+    CommandExecutor,
+    CommandResult,
+    Container,
+    Word,
+    WordListProvider, // bring trait into scope for .refresh()
+    core::types::FeedbackPattern,
+    run_tui,
 };
 
 #[derive(Parser)]
@@ -35,6 +41,12 @@ enum Commands {
         #[arg(short, long, default_value = "100")]
         count: usize,
     },
+    /// Update remote word lists and refresh cache
+    UpdateWords {
+        /// Force refresh even if cache is fresh
+        #[arg(short, long, default_value_t = false)]
+        force: bool,
+    },
 }
 
 #[tokio::main]
@@ -56,6 +68,9 @@ async fn main() -> Result<()> {
         Some(Commands::Benchmark { count }) => {
             run_benchmark(count).await?;
         }
+        Some(Commands::UpdateWords { force }) => {
+            update_words(force).await?;
+        }
     }
 
     Ok(())
@@ -63,6 +78,25 @@ async fn main() -> Result<()> {
 
 async fn run_interactive_mode() -> Result<()> {
     log::info!("Starting modern TUI mode...");
+    // Refresh word lists before starting the TUI so the session uses the latest data
+    {
+        let mut provider = wordle_rust::FileWordListProvider::new();
+        let cache_path = provider.cache_path().to_string();
+        match provider.refresh(true).await {
+            Ok((a, g)) => {
+                println!(
+                    "🔄 Word lists refreshed (Answers: {}, Guesses: {}) -> {}",
+                    a, g, cache_path
+                );
+            }
+            Err(e) => {
+                eprintln!(
+                    "⚠️  Failed to refresh word lists: {} (using existing cache if available at {})",
+                    e, cache_path
+                );
+            }
+        }
+    }
 
     // Run the new TUI application
     run_tui().await
@@ -252,5 +286,22 @@ async fn run_benchmark(count: usize) -> Result<()> {
     );
     println!("📊 Average guesses per solved word: {:.2}", avg_guesses);
 
+    Ok(())
+}
+
+async fn update_words(force: bool) -> Result<()> {
+    println!(
+        "🔄 Refreshing word lists{}...",
+        if force { " (forced)" } else { "" }
+    );
+    // Use the container to get the default provider and call refresh
+    let container = Container::new();
+    let mut provider = container.create_word_list_provider()?;
+
+    let (a, g) = provider.refresh(force).await?;
+    println!("✅ Updated. Answers: {}, Guesses: {}", a, g);
+
+    // Provide a hint about overriding sources
+    println!("ℹ️  You can customize sources via word_sources.json at the project root.");
     Ok(())
 }

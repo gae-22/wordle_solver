@@ -196,7 +196,37 @@ cargo run --release -- solve --guess ADIEU 20100
 # Benchmark performance
 cargo run --release -- benchmark --count=1000
 # Output: Average: 3.47 guesses, Success: 99.8%
+
+# Refresh word lists from remote sources (uses cache if fresh)
+cargo run --release -- update-words
+
+# Force refresh even if cache is fresh
+cargo run --release -- update-words --force
 ```
+
+#### Word list sources and cache
+
+-   The solver maintains a cache at `word_lists.json` in the project root.
+-   On startup it loads from cache if it's newer than 24h; otherwise it fetches and merges multiple trusted sources.
+-   You can customize sources by creating an optional `word_sources.json` at the project root:
+
+```json
+{
+    "answers": [
+        "https://raw.githubusercontent.com/tabatkins/wordle-list/main/words",
+        "https://raw.githubusercontent.com/3b1b/videos/master/_2022/wordle/data/possible_words.txt"
+    ],
+    "guesses": [
+        "https://raw.githubusercontent.com/3b1b/videos/master/_2022/wordle/data/allowed_words.txt",
+        "https://raw.githubusercontent.com/dwyl/english-words/master/words_alpha.txt"
+    ]
+}
+```
+
+Notes:
+
+-   Only 5-letter lowercase words are kept; duplicates are removed.
+-   All answer words are guaranteed to be valid guesses as well.
 
 ### Input Format
 

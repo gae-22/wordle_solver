@@ -7,6 +7,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// Configuration for word list sources
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20,9 +21,13 @@ impl Default for WordListConfig {
         Self {
             answers: vec![
                 "https://raw.githubusercontent.com/3b1b/videos/master/_2022/wordle/data/possible_words.txt".to_string(),
+                // Community-maintained list of NYT Wordle possible answers (frequently updated)
+                "https://raw.githubusercontent.com/tabatkins/wordle-list/main/words".to_string(),
             ],
             guesses: vec![
                 "https://raw.githubusercontent.com/3b1b/videos/master/_2022/wordle/data/allowed_words.txt".to_string(),
+                // Large list of common English words (includes many valid guesses)
+                "https://raw.githubusercontent.com/dwyl/english-words/master/words_alpha.txt".to_string(),
             ],
         }
     }
@@ -101,12 +106,17 @@ impl FileWordListProvider {
     }
 
     pub fn with_cache_path(cache_path: String) -> Self {
-        Self {
+        let mut this = Self {
             answer_words: Vec::new(),
             guess_words: Vec::new(),
             cache_path,
             config: WordListConfig::default(),
+        };
+        // Load optional source override config if present
+        if let Some(cfg) = this.load_config_override() {
+            this.config = cfg;
         }
+        this
     }
 
     pub fn with_config(config: WordListConfig) -> Self {
@@ -115,6 +125,47 @@ impl FileWordListProvider {
             guess_words: Vec::new(),
             cache_path: Self::get_default_cache_path(),
             config,
+        }
+    }
+
+    /// Returns the default path for an optional sources override file in the project root
+    fn get_default_sources_config_path() -> String {
+        let mut current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        loop {
+            let cargo_toml = current_dir.join("Cargo.toml");
+            if cargo_toml.exists() {
+                return current_dir
+                    .join("word_sources.json")
+                    .to_string_lossy()
+                    .to_string();
+            }
+            if let Some(parent) = current_dir.parent() {
+                current_dir = parent.to_path_buf();
+            } else {
+                return "word_sources.json".to_string();
+            }
+        }
+    }
+
+    /// Load configuration override from `word_sources.json` if it exists
+    fn load_config_override(&self) -> Option<WordListConfig> {
+        let path = Self::get_default_sources_config_path();
+        let p = Path::new(&path);
+        if !p.exists() {
+            return None;
+        }
+        match std::fs::read_to_string(p) {
+            Ok(s) => match serde_json::from_str::<WordListConfig>(&s) {
+                Ok(cfg) => Some(cfg),
+                Err(e) => {
+                    log::warn!("Failed to parse word_sources.json: {}", e);
+                    None
+                }
+            },
+            Err(e) => {
+                log::warn!("Failed to read word_sources.json: {}", e);
+                None
+            }
         }
     }
 
@@ -130,8 +181,8 @@ impl FileWordListProvider {
         let cache: WordListCache = serde_json::from_str(&content).map_err(DataError::from)?;
 
         // Check if cache is fresh (less than 24 hours)
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
             .map_err(|_| DataError::InvalidFormat("System time error".to_string()))?
             .as_secs();
 
@@ -142,19 +193,32 @@ impl FileWordListProvider {
         Ok(cache)
     }
 
+    /// Load cache file ignoring staleness checks (best-effort fallback)
+    async fn load_cache_unchecked(&self) -> Result<WordListCache> {
+        if !Path::new(&self.cache_path).exists() {
+            return Err(DataError::MissingData("Cache file not found".to_string()).into());
+        }
+        let content = tokio::fs::read_to_string(&self.cache_path)
+            .await
+            .map_err(DataError::from)?;
+        let cache: WordListCache = serde_json::from_str(&content).map_err(DataError::from)?;
+        Ok(cache)
+    }
+
     async fn download_words(&self) -> Result<(Vec<String>, Vec<String>)> {
-        let client = reqwest::Client::new();
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(20))
+            .build()
+            .map_err(|e| DataError::InvalidFormat(format!("HTTP client error: {}", e)))?;
         let mut answer_words = HashSet::new();
         let mut guess_words = HashSet::new();
 
         // Download answer words
         for url in &self.config.answers {
             log::info!("Downloading answer words from: {}", url);
-            let response = client
-                .get(url)
-                .send()
-                .await
-                .map_err(|e| DataError::InvalidFormat(format!("HTTP error: {}", e)))?;
+            let response = client.get(url).send().await.map_err(|e| {
+                DataError::InvalidFormat(format!("HTTP error fetching {}: {}", url, e))
+            })?;
 
             let text = response
                 .text()
@@ -172,11 +236,9 @@ impl FileWordListProvider {
         // Download guess words
         for url in &self.config.guesses {
             log::info!("Downloading guess words from: {}", url);
-            let response = client
-                .get(url)
-                .send()
-                .await
-                .map_err(|e| DataError::InvalidFormat(format!("HTTP error: {}", e)))?;
+            let response = client.get(url).send().await.map_err(|e| {
+                DataError::InvalidFormat(format!("HTTP error fetching {}: {}", url, e))
+            })?;
 
             let text = response
                 .text()
@@ -203,8 +265,8 @@ impl FileWordListProvider {
     }
 
     async fn save_to_cache(&self, answer_words: &[String], guess_words: &[String]) -> Result<()> {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
             .map_err(|_| DataError::InvalidFormat("System time error".to_string()))?
             .as_secs();
 
@@ -229,6 +291,33 @@ impl FileWordListProvider {
             .map(|s| Word::from_str(&s).map_err(|e| DataError::InvalidFormat(e).into()))
             .collect()
     }
+
+    /// Get the path to the word list cache file
+    pub fn cache_path(&self) -> &str {
+        &self.cache_path
+    }
+
+    /// Force refresh the word lists cache from remote sources.
+    /// When `force` is false, it will skip if the cache is still fresh.
+    pub async fn refresh_cache(&mut self, force: bool) -> Result<(usize, usize)> {
+        let fresh = match self.load_from_cache().await {
+            Ok(_) => true,
+            Err(_) => false,
+        };
+        if fresh && !force {
+            log::info!("Cache is fresh; skipping refresh");
+            let cache = self.load_from_cache().await?;
+            self.answer_words = Self::convert_to_words(cache.answer_words.clone())?;
+            self.guess_words = Self::convert_to_words(cache.guess_words.clone())?;
+            return Ok((self.answer_words.len(), self.guess_words.len()));
+        }
+
+        let (answer_strings, guess_strings) = self.download_words().await?;
+        self.save_to_cache(&answer_strings, &guess_strings).await?;
+        self.answer_words = Self::convert_to_words(answer_strings.clone())?;
+        self.guess_words = Self::convert_to_words(guess_strings.clone())?;
+        Ok((self.answer_words.len(), self.guess_words.len()))
+    }
 }
 
 impl Default for FileWordListProvider {
@@ -247,13 +336,24 @@ impl WordListProvider for FileWordListProvider {
             self.guess_words = Self::convert_to_words(cache.guess_words)?;
         } else {
             log::info!("Downloading fresh word lists");
-            let (answer_strings, guess_strings) = self.download_words().await?;
-
-            self.answer_words = Self::convert_to_words(answer_strings.clone())?;
-            self.guess_words = Self::convert_to_words(guess_strings.clone())?;
-
-            // Save to cache
-            self.save_to_cache(&answer_strings, &guess_strings).await?;
+            match self.download_words().await {
+                Ok((answer_strings, guess_strings)) => {
+                    self.answer_words = Self::convert_to_words(answer_strings.clone())?;
+                    self.guess_words = Self::convert_to_words(guess_strings.clone())?;
+                    // Save to cache
+                    self.save_to_cache(&answer_strings, &guess_strings).await?;
+                }
+                Err(e) => {
+                    log::warn!(
+                        "Download failed: {}. Falling back to stale cache if available.",
+                        e
+                    );
+                    // Try stale cache as a last resort
+                    let cache = self.load_cache_unchecked().await?;
+                    self.answer_words = Self::convert_to_words(cache.answer_words)?;
+                    self.guess_words = Self::convert_to_words(cache.guess_words)?;
+                }
+            }
         }
 
         let mut all_words = self.answer_words.clone();
@@ -278,6 +378,10 @@ impl WordListProvider for FileWordListProvider {
 
     fn is_possible_answer(&self, word: &Word) -> bool {
         self.answer_words.contains(word)
+    }
+
+    async fn refresh(&mut self, force: bool) -> Result<(usize, usize)> {
+        self.refresh_cache(force).await
     }
 }
 
