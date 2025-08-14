@@ -3,12 +3,13 @@ use crate::core::{
     traits::{EntropyCalculator, SolvingStrategy},
     types::Word,
 };
+use rayon::prelude::*;
 
 /// Entropy-based solving strategy
 #[derive(Debug)]
 pub struct EntropyBasedStrategy<E: EntropyCalculator> {
-    entropy_calculator: E,
-    best_first_guess: Word,
+    pub(crate) entropy_calculator: E,
+    pub(crate) best_first_guess: Word,
 }
 
 impl<E: EntropyCalculator> EntropyBasedStrategy<E> {
@@ -65,8 +66,63 @@ impl<E: EntropyCalculator> SolvingStrategy for EntropyBasedStrategy<E> {
                     .find_max_entropy_guess(candidates, possible_words)
             }
         } else {
-            self.entropy_calculator
-                .find_max_entropy_guess(candidates, possible_words)
+            // Optional heuristic prefilter (disabled by default to preserve accuracy)
+            let use_prefilter = std::env::var("WORDLE_FAST_PREFILTER")
+                .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE"))
+                .unwrap_or(false);
+            if use_prefilter && possible_words.len() > 200 {
+                let filtered: Vec<_> = candidates
+                    .iter()
+                    .filter(|w| {
+                        let s = w.as_str().as_bytes();
+                        let mut seen = [false; 26];
+                        for &b in s {
+                            let i = (b - b'a') as usize;
+                            if seen[i] {
+                                return false;
+                            }
+                            seen[i] = true;
+                        }
+                        true
+                    })
+                    .cloned()
+                    .collect();
+                let pool = if !filtered.is_empty() {
+                    &filtered
+                } else {
+                    candidates
+                };
+                // Parallel scan if pool is large
+                let par_threshold = 256;
+                if pool.len() >= par_threshold {
+                    pool.par_iter()
+                        .map(|w| {
+                            let e = self.entropy_calculator.calculate_entropy(w, possible_words);
+                            (w, e)
+                        })
+                        .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+                        .map(|(w, _)| w.clone())
+                } else {
+                    self.entropy_calculator
+                        .find_max_entropy_guess(pool, possible_words)
+                }
+            } else {
+                // Parallel scan if candidates large
+                let par_threshold = 256;
+                if candidates.len() >= par_threshold {
+                    candidates
+                        .par_iter()
+                        .map(|w| {
+                            let e = self.entropy_calculator.calculate_entropy(w, possible_words);
+                            (w, e)
+                        })
+                        .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+                        .map(|(w, _)| w.clone())
+                } else {
+                    self.entropy_calculator
+                        .find_max_entropy_guess(candidates, possible_words)
+                }
+            }
         };
 
         best_word.ok_or_else(|| {
@@ -88,15 +144,29 @@ impl<E: EntropyCalculator> SolvingStrategy for EntropyBasedStrategy<E> {
             return Vec::new();
         }
 
-        let mut scored_candidates: Vec<_> = candidates
-            .iter()
-            .map(|word| {
-                let score = self
-                    .entropy_calculator
-                    .calculate_information_gain(word, possible_words);
-                (word.clone(), score)
-            })
-            .collect();
+        // Parallel scoring for top candidates if set is large
+        let par_threshold = 256;
+        let mut scored_candidates: Vec<_> = if candidates.len() >= par_threshold {
+            candidates
+                .par_iter()
+                .map(|word| {
+                    let score = self
+                        .entropy_calculator
+                        .calculate_information_gain(word, possible_words);
+                    (word.clone(), score)
+                })
+                .collect()
+        } else {
+            candidates
+                .iter()
+                .map(|word| {
+                    let score = self
+                        .entropy_calculator
+                        .calculate_information_gain(word, possible_words);
+                    (word.clone(), score)
+                })
+                .collect()
+        };
 
         // Sort by score (descending)
         scored_candidates

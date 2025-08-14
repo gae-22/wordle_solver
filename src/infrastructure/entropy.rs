@@ -1,40 +1,62 @@
 use crate::core::{
     traits::{EntropyCalculator, FeedbackGenerator},
-    types::{FeedbackPattern, Word},
+    types::Word,
 };
 use crate::domain::DefaultFeedbackGenerator;
 use std::collections::HashMap;
 
 /// High-performance entropy calculator with caching
 #[derive(Debug)]
-pub struct CachedEntropyCalculator {
-    feedback_generator: DefaultFeedbackGenerator,
-}
+pub struct CachedEntropyCalculator {}
 
 impl CachedEntropyCalculator {
     pub fn new() -> Self {
-        Self {
-            feedback_generator: DefaultFeedbackGenerator::new(),
-        }
+        Self {}
     }
 
-    /// Group words by their feedback patterns
-    fn group_by_feedback(
-        &self,
-        guess: &Word,
-        possible_words: &[Word],
-    ) -> HashMap<FeedbackPattern, Vec<Word>> {
-        let mut groups = HashMap::new();
+    /// Compute a compact feedback index (0..243) without allocations.
+    /// Encodes feedback as base-3 digits (0=Absent,1=Present,2=Correct) with position-weighted digits.
+    #[inline]
+    fn feedback_index_bytes(&self, guess_b: &[u8; 5], target_b: &[u8; 5]) -> usize {
+        let mut used = [false; 5];
+        let mut f = [0u8; 5];
 
-        for word in possible_words {
-            let feedback = self.feedback_generator.generate_feedback(guess, word);
-            groups
-                .entry(feedback)
-                .or_insert_with(Vec::new)
-                .push(word.clone());
+        // Greens
+        for i in 0..5 {
+            if guess_b[i] == target_b[i] {
+                f[i] = 2;
+                used[i] = true;
+            }
         }
+        // Yellows
+        for i in 0..5 {
+            if f[i] == 0 {
+                let g = guess_b[i];
+                for j in 0..5 {
+                    if !used[j] && g == target_b[j] {
+                        f[i] = 1;
+                        used[j] = true;
+                        break;
+                    }
+                }
+            }
+        }
+        // Encode base-3 little-endian
+        (f[0] as usize)
+            + (f[1] as usize) * 3
+            + (f[2] as usize) * 9
+            + (f[3] as usize) * 27
+            + (f[4] as usize) * 81
+    }
 
-        groups
+    #[inline]
+    fn feedback_index(&self, guess: &Word, target: &Word) -> usize {
+        let gb = guess.as_str().as_bytes();
+        let tb = target.as_str().as_bytes();
+        // Safety: words are validated 5-letter ASCII lowercase
+        let gb5: &[u8; 5] = gb.try_into().expect("word length must be 5");
+        let tb5: &[u8; 5] = tb.try_into().expect("word length must be 5");
+        self.feedback_index_bytes(gb5, tb5)
     }
 
     /// Calculate information gain based on expected partition sizes
@@ -42,26 +64,23 @@ impl CachedEntropyCalculator {
         if possible_words.is_empty() {
             return 0.0;
         }
-
-        let groups = self.group_by_feedback(guess, possible_words);
-        let total_words = possible_words.len() as f64;
-
-        // Calculate weighted average of log2(group_size)
-        let expected_log_size: f64 = groups
-            .values()
-            .map(|group| {
-                let probability = group.len() as f64 / total_words;
-                let log_size = if group.len() > 0 {
-                    (group.len() as f64).log2()
-                } else {
-                    0.0
-                };
-                probability * log_size
+        // Count into 243 buckets
+        let mut counts = [0usize; 243];
+        for w in possible_words {
+            let idx = self.feedback_index(guess, w);
+            counts[idx] += 1;
+        }
+        let total = possible_words.len() as f64;
+        let expected_log_size: f64 = counts
+            .iter()
+            .filter(|&&c| c > 0)
+            .map(|&c| {
+                let p = c as f64 / total;
+                let log_size = (c as f64).log2();
+                p * log_size
             })
             .sum();
-
-        // Information gain = log2(total) - expected_log_size
-        total_words.log2() - expected_log_size
+        total.log2() - expected_log_size
     }
 }
 
@@ -76,25 +95,21 @@ impl EntropyCalculator for CachedEntropyCalculator {
         if possible_words.is_empty() {
             return 0.0;
         }
-
         if possible_words.len() == 1 {
-            // If only one word remains, entropy is 0
             return 0.0;
         }
-
-        let groups = self.group_by_feedback(guess, possible_words);
-        let total_words = possible_words.len() as f64;
-
-        // Calculate Shannon entropy: -Σ(p * log2(p))
-        groups
-            .values()
-            .map(|group| {
-                let probability = group.len() as f64 / total_words;
-                if probability > 0.0 {
-                    -probability * probability.log2()
-                } else {
-                    0.0
-                }
+        let mut counts = [0usize; 243];
+        for w in possible_words {
+            let idx = self.feedback_index(guess, w);
+            counts[idx] += 1;
+        }
+        let total = possible_words.len() as f64;
+        counts
+            .iter()
+            .filter(|&&c| c > 0)
+            .map(|&c| {
+                let p = c as f64 / total;
+                -p * p.log2()
             })
             .sum()
     }

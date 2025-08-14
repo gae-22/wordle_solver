@@ -8,5 +8,5 @@ target
 .vscode
 
 .DS_Store
+word_lists.wlf
 INSTRUCTIONS.md
-word_lists.json

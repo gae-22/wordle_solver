@@ -21,33 +21,31 @@ impl Default for DefaultFeedbackGenerator {
 
 impl FeedbackGenerator for DefaultFeedbackGenerator {
     fn generate_feedback(&self, guess: &Word, target: &Word) -> FeedbackPattern {
-        let guess_chars = guess.chars();
-        let target_chars = target.chars();
-        let mut feedback = vec![Feedback::Absent; 5];
-        let mut target_used = vec![false; 5];
+        let gb = guess.as_str().as_bytes();
+        let tb = target.as_str().as_bytes();
+        let mut out = [Feedback::Absent; 5];
+        let mut used = [false; 5];
 
-        // First pass: mark correct positions
+        // Greens
         for i in 0..5 {
-            if guess_chars[i] == target_chars[i] {
-                feedback[i] = Feedback::Correct;
-                target_used[i] = true;
+            if gb[i] == tb[i] {
+                out[i] = Feedback::Correct;
+                used[i] = true;
             }
         }
-
-        // Second pass: mark present but wrong position
+        // Yellows
         for i in 0..5 {
-            if feedback[i] == Feedback::Absent {
+            if matches!(out[i], Feedback::Absent) {
                 for j in 0..5 {
-                    if !target_used[j] && guess_chars[i] == target_chars[j] {
-                        feedback[i] = Feedback::Present;
-                        target_used[j] = true;
+                    if !used[j] && gb[i] == tb[j] {
+                        out[i] = Feedback::Present;
+                        used[j] = true;
                         break;
                     }
                 }
             }
         }
-
-        FeedbackPattern::new(feedback).expect("Generated feedback should be valid")
+        FeedbackPattern::new(out.into_iter().collect()).expect("Generated feedback should be valid")
     }
 
     fn is_consistent(&self, word: &Word, constraints: &[crate::core::types::Guess]) -> bool {

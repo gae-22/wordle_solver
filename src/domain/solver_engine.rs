@@ -5,6 +5,7 @@ use crate::core::{
 };
 use async_trait::async_trait;
 use std::fmt;
+use std::sync::Arc;
 
 /// Default implementation of Wordle solver
 pub struct DefaultWordleSolver {
@@ -12,6 +13,7 @@ pub struct DefaultWordleSolver {
     strategy: Box<dyn SolvingStrategy>,
     constraint_filter: Box<dyn ConstraintFilter>,
     possible_words: Vec<Word>,
+    candidates: Arc<Vec<Word>>,
     guess_history: Vec<Guess>,
 }
 
@@ -37,11 +39,18 @@ impl DefaultWordleSolver {
         word_list_provider.load_words().await?;
         let possible_words = word_list_provider.get_answer_words().to_vec();
 
+        // Precompute candidates (answers ∪ guesses), sorted/deduped once
+        let mut candidates = word_list_provider.get_answer_words().to_vec();
+        candidates.extend(word_list_provider.get_guess_words().iter().cloned());
+        candidates.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+        candidates.dedup();
+
         Ok(Self {
             word_list_provider,
             strategy,
             constraint_filter,
             possible_words,
+            candidates: Arc::new(candidates),
             guess_history: Vec::new(),
         })
     }
@@ -53,17 +62,9 @@ impl DefaultWordleSolver {
             .filter_words(&self.possible_words, &self.guess_history);
     }
 
-    /// Get all valid candidates for guessing
-    fn get_candidates(&self) -> Vec<Word> {
-        // Use both answer words and guess words as candidates
-        let mut candidates = self.word_list_provider.get_answer_words().to_vec();
-        candidates.extend(self.word_list_provider.get_guess_words().iter().cloned());
-
-        // Remove duplicates and sort
-        candidates.sort_by(|a, b| a.as_str().cmp(b.as_str()));
-        candidates.dedup();
-
-        candidates
+    /// Get all valid candidates for guessing (precomputed and cached)
+    fn get_candidates(&self) -> Arc<Vec<Word>> {
+        self.candidates.clone()
     }
 }
 
@@ -109,9 +110,10 @@ impl WordleSolver for DefaultWordleSolver {
             return Ok(self.possible_words[0].clone());
         }
 
+        // Clone small set to avoid borrow conflict; remaining words are usually smaller
+        let possible_words = self.possible_words.clone();
         let candidates = self.get_candidates();
-        self.strategy
-            .get_best_guess(&self.possible_words, &candidates)
+        self.strategy.get_best_guess(&possible_words, &candidates)
     }
 
     fn get_best_first_guess(&self) -> Result<Word> {
@@ -167,9 +169,10 @@ impl WordleSolver for DefaultWordleSolver {
             return Vec::new();
         }
 
+        let possible_words = self.possible_words.clone();
         let candidates = self.get_candidates();
         self.strategy
-            .get_top_candidates(&self.possible_words, &candidates, limit)
+            .get_top_candidates(&possible_words, &candidates, limit)
     }
 }
 

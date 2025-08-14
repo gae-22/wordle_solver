@@ -206,18 +206,19 @@ cargo run --release -- update-words --force
 
 #### Word list sources and cache
 
--   The solver maintains a cache at `word_lists.json` in the project root.
--   On startup it loads from cache if it's newer than 24h; otherwise it fetches and merges multiple trusted sources.
+-   The solver maintains caches in the project root:
+    -   `word_lists.wlf` — compact binary cache optimized for Wordle (fast load)
+    -   `word_lists.json` — human-readable JSON (compatibility/inspection)
+-   On startup it prefers the binary cache if present and newer than 24h; otherwise it falls back to JSON. If both are absent or stale, it fetches from the default source and writes both caches.
+-   Default source: https://raw.githubusercontent.com/dwyl/english-words/master/words_alpha.txt
 -   You can customize sources by creating an optional `word_sources.json` at the project root:
 
 ```json
 {
     "answers": [
-        "https://raw.githubusercontent.com/tabatkins/wordle-list/main/words",
-        "https://raw.githubusercontent.com/3b1b/videos/master/_2022/wordle/data/possible_words.txt"
+        "https://raw.githubusercontent.com/dwyl/english-words/master/words_alpha.txt"
     ],
     "guesses": [
-        "https://raw.githubusercontent.com/3b1b/videos/master/_2022/wordle/data/allowed_words.txt",
         "https://raw.githubusercontent.com/dwyl/english-words/master/words_alpha.txt"
     ]
 }
@@ -225,8 +226,16 @@ cargo run --release -- update-words --force
 
 Notes:
 
--   Only 5-letter lowercase words are kept; duplicates are removed.
+-   Only 5-letter lowercase words are kept from the source; duplicates are removed.
 -   All answer words are guaranteed to be valid guesses as well.
+
+Binary cache format (WLF1):
+
+-   Magic: `WLF1` (ASCII)
+-   Header: `last_updated` (u64 LE), counts: answers (u32 LE), guesses (u32 LE)
+-   Payload: contiguous 5-byte ASCII per word (answers first, then guesses)
+
+This format gives minimal disk footprint and O(1) word decode without JSON parsing.
 
 ### Input Format
 
