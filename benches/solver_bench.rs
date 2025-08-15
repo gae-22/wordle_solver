@@ -1,5 +1,5 @@
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
-use wordle_rust::{CachedEntropyCalculator, EntropyCalculator, Word};
+use wordle::{CachedEntropyCalculator, EntropyCalculator, Word};
 
 fn benchmark_entropy_calculation(c: &mut Criterion) {
     let entropy_calc = CachedEntropyCalculator::new();

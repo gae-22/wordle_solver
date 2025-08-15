@@ -1,10 +1,10 @@
 [package]
-name = "wordle_rust"
+name = "wordle"
 version = "1.0.0"
 edition = "2021"
 
 [[bin]]
-name = "wordle_rust"
+name = "wordle"
 path = "src/main.rs"
 
 [dependencies]

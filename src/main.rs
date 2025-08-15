@@ -1,11 +1,11 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use wordle_rust::{
+use wordle::{
     Command, CommandExecutor, CommandResult, Container, Word, core::types::FeedbackPattern, run_tui,
 };
 
 #[derive(Parser)]
-#[command(name = "wordle_rust")]
+#[command(name = "wordle")]
 #[command(about = "Modern AI Wordle Solver with Clean Architecture")]
 #[command(version = "1.0.0")]
 struct Cli {
